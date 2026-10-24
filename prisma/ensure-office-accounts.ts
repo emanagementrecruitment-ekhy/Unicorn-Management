@@ -24,7 +24,7 @@ const CONSULTANT_ACCOUNT = {
   role: "Admin",
   accessRole: "CONSULTANT",
   email: "official.arcorporation@gmail.com",
-  phone: "087843860999",
+  phone: "0881025458888",
 };
 
 async function main() {

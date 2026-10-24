@@ -15,5 +15,5 @@ export const BRAND = {
   email: "hr@unicornmanagement.id",
   websiteHost: "unicornmanagement.id",
   /** Call-center / HR phone shown by the assistant. */
-  phone: "0000-0000-0000",
+  phone: "0881-02545-8888",
 } as const;

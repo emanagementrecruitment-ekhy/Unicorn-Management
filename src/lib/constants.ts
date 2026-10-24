@@ -293,6 +293,9 @@ export const LIGHT_MODE_DAY_END_HOUR = 18;
 // the code on-screen for this one account, in every environment including
 // production, so the demo stays usable without real delivery.
 export const DEMO_TERA_CODE = "DEMO-01";
+/** Demo Koordinator — created on every start only until the Owner is generated; the Owner may delete it any time. */
+export const DEMO_KOORD_CODE = "DEMO-02";
+export const DEMO_CODES = [DEMO_TERA_CODE, DEMO_KOORD_CODE];
 
 /** Official public contact of AR Corporation — one source for the privacy page, Pusat Sistem and Ara. */
 export const COMPANY_NAME = BRAND.company;

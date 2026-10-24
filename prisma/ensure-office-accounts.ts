@@ -21,9 +21,9 @@ const prisma = new PrismaClient();
 const CONSULTANT_ACCOUNT = {
   code: "HQ-CONSULT",
   name: "Admin",
-  role: "Admin AR Corp",
+  role: "Admin",
   accessRole: "CONSULTANT",
-  email: "aldhilarizky@gmail.com",
+  email: "official.arcorporation@gmail.com",
   phone: "087843860999",
 };
 

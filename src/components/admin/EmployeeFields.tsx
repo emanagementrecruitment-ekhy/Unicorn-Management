@@ -1,0 +1,256 @@
+"use client";
+
+import { FIELD_CITIES, FIELD_ROLES, VOUCHER_AMOUNT, VOUCHER_LABEL, levelOptionLabel, usesVcr, type EmployeeLevel } from "@/lib/constants";
+import { computeAge } from "@/lib/birthday";
+
+export interface SupervisorOption {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface EmployeeFieldsValue {
+  name: string;
+  email: string;
+  phone: string;
+  level: EmployeeLevel;
+  role: string;
+  place: string;
+  supervisorId: string;
+  joinedAt: string; // "" or "YYYY-MM-DD" (Tanggal Bergabung)
+  nik: string;
+  birthPlace: string;
+  birthDate: string; // "" or "YYYY-MM-DD" (native <input type="date"> value)
+  customRate: string;
+  salary: string;
+  ageYears: string;
+  weightKg: string;
+  heightCm: string;
+}
+
+const inputCls = "w-full py-2.5 px-3.5 bg-ar-input border border-ar-goldline rounded-[10px] text-ar-text text-[12.5px]";
+const labelCls = "text-[10px] tracking-[0.14em] uppercase text-ar-dim mb-1.5 block";
+
+export function emptyEmployeeFields(kind?: "staff" | "tera"): EmployeeFieldsValue {
+  return {
+    name: "",
+    email: "",
+    phone: "",
+    level: "SILVER",
+    role: kind === "tera" ? "Tera" : kind === "staff" ? "Staff" : FIELD_ROLES[0],
+    place: FIELD_CITIES[0].place,
+    supervisorId: "",
+    joinedAt: new Date().toISOString().slice(0, 10),
+    nik: "",
+    birthPlace: "",
+    birthDate: "",
+    customRate: "",
+    salary: "",
+    ageYears: "",
+    weightKg: "",
+    heightCm: "",
+  };
+}
+
+/** Shared field grid for both the add-employee and edit-employee forms. */
+export default function EmployeeFields({
+  value,
+  onChange,
+  supervisors,
+  excludeSupervisorId,
+  roleKind,
+}: {
+  value: EmployeeFieldsValue;
+  onChange: (patch: Partial<EmployeeFieldsValue>) => void;
+  supervisors: SupervisorOption[];
+  excludeSupervisorId?: string;
+  /** "staff" hides the Tera role, "tera" locks the role to Tera; omit for the edit form (all roles). */
+  roleKind?: "staff" | "tera";
+}) {
+  const roleChoices = FIELD_ROLES.filter((r) => (roleKind === "staff" ? !usesVcr(r) : roleKind === "tera" ? usesVcr(r) : true));
+  const supervisorOptions = supervisors.filter((s) => s.id !== excludeSupervisorId);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div>
+        <label className={labelCls}>Nama Lengkap</label>
+        <input
+          value={value.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          placeholder="cth. Rangga Saputra"
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className={labelCls}>Peran</label>
+        <select value={value.role} onChange={(e) => onChange({ role: e.target.value })} disabled={roleKind === "tera"} className={inputCls}>
+          {/* A legacy value from before the Peran list changed won't match any preset —
+              show it anyway so the dropdown never silently displays something other than
+              what's actually stored (and about to be resubmitted unless changed). */}
+          {value.role && !roleKind && !(FIELD_ROLES as readonly string[]).includes(value.role) && (
+            <option value={value.role}>{value.role} (lama)</option>
+          )}
+          {roleChoices.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={labelCls}>Email</label>
+        <input
+          value={value.email}
+          onChange={(e) => onChange({ email: e.target.value })}
+          placeholder="nama@arcorp.id"
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className={labelCls}>Nomor HP</label>
+        <input
+          value={value.phone}
+          onChange={(e) => onChange({ phone: e.target.value })}
+          placeholder="0812 xxxx xxxx"
+          className={inputCls}
+        />
+      </div>
+      {usesVcr(value.role) ? (
+        <>
+          <div>
+            <label className={labelCls}>Pendapatan / VCR</label>
+            <select
+              value={value.level}
+              onChange={(e) => onChange({ level: e.target.value as EmployeeLevel })}
+              className={inputCls}
+            >
+              {(Object.keys(VOUCHER_AMOUNT) as EmployeeLevel[]).map((lvl) => (
+                <option key={lvl} value={lvl}>
+                  {lvl === "MANUAL" ? VOUCHER_LABEL[lvl] : levelOptionLabel(lvl)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {value.level === "MANUAL" && (
+            <div>
+              <label className={labelCls}>Nominal Manual (Rp/voucher)</label>
+              <input
+                type="number"
+                value={value.customRate}
+                onChange={(e) => onChange({ customRate: e.target.value })}
+                placeholder="cth. 200000"
+                className={inputCls}
+              />
+            </div>
+          )}
+          <div>
+            <label className={labelCls}>Usia (tahun)</label>
+            <input
+              type="number"
+              value={value.ageYears}
+              onChange={(e) => onChange({ ageYears: e.target.value })}
+              placeholder="cth. 21"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Berat Badan (kg)</label>
+            <input
+              type="number"
+              value={value.weightKg}
+              onChange={(e) => onChange({ weightKg: e.target.value })}
+              placeholder="cth. 55"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Tinggi Badan (cm)</label>
+            <input
+              type="number"
+              value={value.heightCm}
+              onChange={(e) => onChange({ heightCm: e.target.value })}
+              placeholder="cth. 165"
+              className={inputCls}
+            />
+          </div>
+        </>
+      ) : (
+        <div>
+          <label className={labelCls}>Nominal Gaji (Rp/bulan)</label>
+          <input
+            type="number"
+            value={value.salary}
+            onChange={(e) => onChange({ salary: e.target.value })}
+            placeholder="cth. 4500000"
+            className={inputCls}
+          />
+        </div>
+      )}
+      <div>
+        <label className={labelCls}>Lokasi Kerja</label>
+        <select value={value.place} onChange={(e) => onChange({ place: e.target.value })} className={inputCls}>
+          {value.place && !FIELD_CITIES.some((c) => c.place === value.place) && (
+            <option value={value.place}>{value.place} (lama)</option>
+          )}
+          {FIELD_CITIES.map((c) => (
+            <option key={c.place} value={c.place}>
+              {c.place}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={labelCls}>Tanggal Bergabung</label>
+        <input
+          type="date"
+          value={value.joinedAt}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={(e) => onChange({ joinedAt: e.target.value })}
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className={labelCls}>Supervisor (Kepala Mess, opsional)</label>
+        <select value={value.supervisorId} onChange={(e) => onChange({ supervisorId: e.target.value })} className={inputCls}>
+          <option value="">Tidak ada</option>
+          {supervisorOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.code})
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={labelCls}>NIK (16 digit, sesuai KTP)</label>
+        <input
+          value={value.nik}
+          onChange={(e) => onChange({ nik: e.target.value.replace(/\D/g, "").slice(0, 16) })}
+          inputMode="numeric"
+          placeholder="cth. 3171xxxxxxxxxxxx"
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className={labelCls}>Tempat Lahir (sesuai KTP)</label>
+        <input
+          value={value.birthPlace}
+          onChange={(e) => onChange({ birthPlace: e.target.value })}
+          placeholder="cth. Jakarta"
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className={labelCls}>
+          Tanggal Lahir (sesuai KTP){value.birthDate ? ` — ${computeAge(value.birthDate)} tahun` : ""}
+        </label>
+        <input
+          type="date"
+          value={value.birthDate}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={(e) => onChange({ birthDate: e.target.value })}
+          className={inputCls}
+        />
+      </div>
+    </div>
+  );
+}

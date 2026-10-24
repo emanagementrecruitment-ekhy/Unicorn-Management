@@ -1,0 +1,418 @@
+import "server-only";
+import { Prisma } from "@prisma/client";
+import { prisma } from "./prisma";
+import { monthRange, parseMonth } from "./period";
+import { dLabel, monthLabel } from "./format";
+import { VOUCHER_LABEL, VOUCHER_AMOUNT, usesVcr, ATTENDANCE_MIN_DAYS, ATTENDANCE_PENALTY_AMOUNT, ATTENDANCE_PENALTY_CATEGORY, ATTENDANCE_CHECKIN_START_MONTH, type EmployeeLevel, isStaffRole } from "./constants";
+import { getAttendanceDaysCount, daysInMonth } from "./attendance";
+import { computeKasbonCarry, prevYm } from "./kasbon-carry";
+import { buildSheet, sheetTotal, type SheetRow, type SheetItemIn, type VcrLine } from "./payslip-sheet";
+
+export interface PayslipRow {
+  no: number;
+  id: string | null; // PayslipItem id — deletable manual row when set, null for the computed VCR/Kasbon rows
+  date: string | null;
+  dateRaw: string | null; // "YYYY-MM-DD" — for pre-filling the edit form's <input type="date">
+  description: string;
+  category: string | null;
+  qty: string | null;
+  debit: number;
+  credit: number;
+  note: string | null;
+  balance: number;
+}
+
+export interface SavingRow {
+  id: string;
+  date: string;
+  amount: number;
+  note: string | null;
+}
+
+/** Day-by-day VCR count (the "REPORT" block left of Rincian Payroll). One column for the normal slip; S and D for the TRAVEL / CLASSIC T5 slip. */
+export interface PayslipDaily {
+  columns: string[]; // e.g. ["VCR"] or ["S", "D"]
+  days: Array<{ key: string; label: string; counts: number[] }>; // one per calendar day of the month (key = YYYY-MM-DD)
+  totals: number[]; // per column
+  grand: number;
+}
+
+/** TRAVEL = Tera working TRAVEL / CLASSIC T5 (categories S and D); NORMAL = every other Tera; null = not a VCR (Tera) payslip. */
+export type PayslipVariant = "NORMAL" | "TRAVEL" | null;
+
+// Outlets whose Tera use the two-category (S / D) Slip Pay; everyone else uses the normal one.
+const TRAVEL_PLACES = ["TRAVEL", "CLASSIC T5"];
+const SD_CATEGORIES: Array<{ key: EmployeeLevel; label: string }> = [
+  { key: "FL", label: "S" },
+  { key: "CLASSIC_D", label: "D" },
+];
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+export function jakartaDay(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }); // YYYY-MM-DD
+}
+
+/** Category marker of rows written from the Slip Gaji edit panel (one row per line, see /api/admin/payslip/karyawan). */
+export const SLIP_GAJI_CATEGORY = "SlipGaji";
+
+export type KaryawanLine = "bonus" | "tunjangan" | "feeVcr" | "feeTransport" | "kasbon" | "denda" | "terlambat" | "lain";
+
+/** Which Slip Gaji line a stored PayslipItem belongs to (additions by debit, deductions by credit). */
+export function karyawanLineOf(it: { category: string | null; description: string; debit: number; credit: number }): KaryawanLine | null {
+  const text = `${it.category ?? ""} ${it.description}`.toLowerCase();
+  if (it.debit > 0) {
+    if (/tunjangan/.test(text)) return "tunjangan";
+    if (/transport/.test(text)) return "feeTransport";
+    if (/vcr/.test(text)) return "feeVcr";
+    return "bonus";
+  }
+  if (it.credit > 0) {
+    if (/kasbon/.test(text)) return "kasbon";
+    if (/pinalty|penalty|denda/.test(text)) return "denda";
+    if (/terlambat|telat/.test(text)) return "terlambat";
+    return "lain";
+  }
+  return null;
+}
+
+/** Sums stored rows into the Slip Gaji lines (optionally ignoring the rows written by the edit panel). */
+export function groupKaryawanItems(
+  items: Array<{ category: string | null; description: string; qty: string | null; debit: number; credit: number }>,
+  skipEditPanelRows = false,
+): Record<KaryawanLine | "feeVcrQty", number> {
+  const out = { bonus: 0, tunjangan: 0, feeVcr: 0, feeVcrQty: 0, feeTransport: 0, kasbon: 0, denda: 0, terlambat: 0, lain: 0 };
+  for (const it of items) {
+    if (skipEditPanelRows && it.category === SLIP_GAJI_CATEGORY) continue;
+    const line = karyawanLineOf(it);
+    if (!line) continue;
+    out[line] += line === "bonus" || line === "tunjangan" || line === "feeVcr" || line === "feeTransport" ? it.debit : it.credit;
+    if (line === "feeVcr") out.feeVcrQty += Number((it.qty ?? "").match(/\d+/)?.[0] ?? 0);
+  }
+  return out;
+}
+
+/** "Slip Gaji Karyawan" summary (non-Tera): earnings and deductions grouped like the owner's PDF format. */
+export interface KaryawanSlip {
+  register: string; // join month, e.g. "SEPTEMBER 2026"
+  gajiPokok: number;
+  bonus: number;
+  tunjangan: number;
+  feeVcr: number;
+  feeVcrQty: number;
+  feeVcrRate: number; // per-VCR rate (feeVcr / feeVcrQty)
+  feeTransport: number;
+  kasbon: number;
+  denda: number;
+  terlambat: number;
+  lain: number;
+  total: number;
+  note: string; // free text typed by the admin, shown to the karyawan
+  carryKasbon: number; // part of `kasbon` carried over from earlier months
+}
+
+export interface Payslip {
+  /** Set for karyawan (non-Tera) payslips: the Slip Gaji Karyawan layout. */
+  karyawan: KaryawanSlip | null;
+  variant: PayslipVariant;
+  daily: PayslipDaily | null;
+  employee: { name: string; code: string; role: string; place: string; level: EmployeeLevel | null; levelLabel: string; nik: string; phone: string; email: string };
+  /** Only for a MANUAL-level Tera: the per-voucher rate typed on this month's Slip Pay (null = not typed, falls back to the stored voucher amounts). */
+  manualRate: number | null;
+  month: string;
+  monthLabel: string;
+  rows: PayslipRow[];
+  sheet: SheetRow[]; // same data laid out like the Excel Rincian Payroll (see payslip-sheet.ts)
+  total: number;
+  savings: SavingRow[];
+  attendance: { hariHadir: number; totalDays: number; persen: number; trackingStarted: boolean };
+}
+
+/**
+ * Builds one employee's monthly Slip Pay ledger. "TOTAL VCR" (Tera only),
+ * "GAJI POKOK" (every other Peran, from their fixed Employee.salary), and
+ * "KASBON DISETUJUI" are computed live from Voucher/Employee/Kasbon — never
+ * stored — so they can't drift from the real numbers even if this month's
+ * data changes after the payslip was last viewed. Everything else (fees,
+ * penalties, item purchases, corrections, ...) comes from manually-entered
+ * PayslipItem rows, since the app has no other record of them.
+ */
+export async function buildPayslip(employeeId: string, month: string): Promise<Payslip | null> {
+  const { start, end } = monthRange(month);
+  const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
+  if (!employee || !isStaffRole(employee.accessRole)) return null;
+
+  const [vouchers, kasbonRows, items, savings, hariHadir, rateRow] = await Promise.all([
+    prisma.voucher.findMany({ where: { employeeId, occurredAt: { gte: start, lt: end } } }),
+    prisma.kasbon.findMany({ where: { employeeId, status: "DISETUJUI", createdAt: { gte: start, lt: end } } }),
+    prisma.payslipItem.findMany({ where: { employeeId, month }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    prisma.savingEntry.findMany({ where: { employeeId, date: { gte: start, lt: end } }, orderBy: { date: "asc" } }),
+    getAttendanceDaysCount(employeeId, month),
+    prisma.payslipRate.findUnique({ where: { employeeId_month: { employeeId, month } } }),
+  ]);
+
+  const vcr = usesVcr(employee.role);
+  // MANUAL level: a rate typed on the Slip Pay overrides the amounts stored on each voucher.
+  const place = (employee.homePlace ?? "").trim().toUpperCase();
+  const variant: PayslipVariant = !vcr ? null : TRAVEL_PLACES.includes(place) || vouchers.some((v) => v.category === "FL" || v.category === "CLASSIC_D") ? "TRAVEL" : "NORMAL";
+  const manualRate = vcr && employee.level === "MANUAL" && rateRow ? rateRow.rate : null;
+  const vcrTotal = manualRate != null ? vouchers.length * manualRate : vouchers.reduce((s, v) => s + v.amount, 0);
+  // Tera: an approved kasbon is deducted in full the month it was taken. Karyawan: any instalment is agreed
+  // case by case, so nothing is auto-deducted — Admin enters each cicilan by hand (Masuk ke Blok: Kasbon Uang).
+  const autoKasbon = vcr ? kasbonRows : [];
+  // Kasbon / titipan still unreturned at the end of last month lands here automatically (Tera and karyawan).
+  const carry = await computeKasbonCarry({ id: employee.id, role: employee.role, salary: employee.salary }, month);
+  const carryLabel = `SISA KASBON ${monthLabel(prevYm(month)).toUpperCase()}`;
+  const kasbonTotal = autoKasbon.reduce((s, k) => s + k.amount, 0) + carry;
+
+  const draft: Array<Omit<PayslipRow, "no" | "balance">> = [];
+  if (vcr && vcrTotal > 0) {
+    draft.push({ id: null, date: null, dateRaw: null, description: "TOTAL VCR", category: null, qty: `${vouchers.length} vcr`, debit: vcrTotal, credit: 0, note: null });
+  }
+  if (!vcr && employee.salary && employee.salary > 0) {
+    draft.push({ id: null, date: null, dateRaw: null, description: "GAJI POKOK", category: null, qty: null, debit: employee.salary, credit: 0, note: null });
+  }
+  if (kasbonTotal - carry > 0) {
+    draft.push({ id: null, date: null, dateRaw: null, description: "KASBON DISETUJUI", category: null, qty: null, debit: 0, credit: kasbonTotal - carry, note: null });
+  }
+  if (carry > 0) {
+    draft.push({ id: null, date: null, dateRaw: null, description: carryLabel, category: null, qty: null, debit: 0, credit: carry, note: "Otomatis dari bulan sebelumnya" });
+  }
+  for (const it of items) {
+    draft.push({
+      id: it.id,
+      date: it.date ? dLabel(it.date) : null,
+      dateRaw: it.date ? it.date.toISOString().slice(0, 10) : null,
+      description: it.description,
+      category: it.category,
+      qty: it.qty,
+      debit: it.debit,
+      credit: it.credit,
+      note: it.note,
+    });
+  }
+
+  let balance = 0;
+  const rows: PayslipRow[] = draft.map((r, i) => {
+    balance += r.debit - r.credit;
+    return { ...r, no: i + 1, balance };
+  });
+
+  // Excel-style sheet: Kasbon (each approved one), Ambil Barang etc. land in their blocks automatically.
+  const amounts = new Set(vouchers.map((v) => v.amount));
+  // Travel / Classic T5: one VCR row per category (S, D, plus any other category actually used).
+  let vcrLines: VcrLine[] | undefined;
+  let daily: PayslipDaily | null = null;
+  if (variant) {
+    const cols = variant === "TRAVEL" ? [...SD_CATEGORIES.map((c) => c.label), ...(vouchers.some((v) => !SD_CATEGORIES.some((c) => c.key === v.category)) ? ["LAIN"] : [])] : ["VCR"];
+    const colOf = (cat: string): number => {
+      if (variant === "NORMAL") return 0;
+      const i = SD_CATEGORIES.findIndex((c) => c.key === cat);
+      return i >= 0 ? i : cols.length - 1;
+    };
+    const [yy, mm] = month.split("-").map(Number);
+    const nDays = daysInMonth(month);
+    const days = Array.from({ length: nDays }, (_, i) => ({
+      key: `${month}-${String(i + 1).padStart(2, "0")}`,
+      label: `${String(i + 1).padStart(2, "0")} ${MONTH_ABBR[mm - 1]} ${yy}`,
+      counts: cols.map(() => 0),
+    }));
+    for (const v of vouchers) {
+      const day = days.find((d) => d.key === jakartaDay(v.occurredAt));
+      if (day) day.counts[colOf(v.category)] += 1;
+    }
+    const totals = cols.map((_, i) => days.reduce((s, d) => s + d.counts[i], 0));
+    daily = { columns: cols, days: days.map((d) => ({ key: d.key, label: d.label, counts: d.counts })), totals, grand: totals.reduce((a, b) => a + b, 0) };
+
+    if (variant === "TRAVEL") {
+      const cats: Array<{ label: string; match: (c: string) => boolean; unit: number | null }> = [
+        ...SD_CATEGORIES.map((c) => ({ label: c.label, match: (x: string) => x === c.key, unit: VOUCHER_AMOUNT[c.key] as number | null })),
+      ];
+      if (cols.includes("LAIN")) cats.push({ label: "LAIN", match: (x: string) => !SD_CATEGORIES.some((c) => c.key === x), unit: null });
+      vcrLines = cats.map((c) => {
+        const mine = vouchers.filter((v) => c.match(v.category));
+        const amts = new Set(mine.map((v) => v.amount));
+        return { label: `TOTAL VCR ${c.label}`, count: mine.length, total: mine.reduce((s, v) => s + v.amount, 0), unit: amts.size === 1 ? mine[0].amount : c.unit };
+      });
+    }
+  }
+
+  const sheet = buildSheet({
+    vcrLines,
+    vcr: vcr ? { count: vouchers.length, total: vcrTotal, unit: manualRate != null ? manualRate : amounts.size === 1 ? vouchers[0].amount : null } : null,
+    salary: employee.salary,
+    kasbon: autoKasbon.map((k): SheetItemIn => {
+      const d = k.decidedAt ?? k.createdAt;
+      return { id: null, date: dLabel(d), dateRaw: d.toISOString().slice(0, 10), description: k.reason || "Kasbon", category: "Kasbon Uang", qty: null, debit: 0, credit: k.amount, note: null };
+    }).concat(carry > 0 ? [{ id: null, date: null, dateRaw: null, description: carryLabel, category: "Kasbon Uang", qty: null, debit: 0, credit: carry, note: "Otomatis dari bulan sebelumnya" }] : []),
+    items: items.map((it) => ({
+      id: it.id,
+      date: it.date ? dLabel(it.date) : null,
+      dateRaw: it.date ? it.date.toISOString().slice(0, 10) : null,
+      description: it.description,
+      category: it.category,
+      qty: it.qty,
+      debit: it.debit,
+      credit: it.credit,
+      note: it.note,
+    })),
+  });
+
+  // Slip Gaji Karyawan: group the stored rows into the owner's earnings / deductions lines.
+  let karyawan: KaryawanSlip | null = null;
+  if (!vcr) {
+    const k: KaryawanSlip = { register: "", gajiPokok: employee.salary ?? 0, bonus: 0, tunjangan: 0, feeVcr: 0, feeVcrQty: 0, feeVcrRate: 0, feeTransport: 0, kasbon: 0, denda: 0, terlambat: 0, lain: 0, total: 0, note: "", carryKasbon: carry };
+    Object.assign(k, groupKaryawanItems(items));
+    for (const r of autoKasbon) k.kasbon += r.amount;
+    k.kasbon += carry;
+    k.feeVcrRate = k.feeVcrQty > 0 ? Math.round(k.feeVcr / k.feeVcrQty) : 0;
+    k.note = (await prisma.payslipNote.findUnique({ where: { employeeId_month: { employeeId, month } } }))?.text ?? "";
+    k.total = k.gajiPokok + k.bonus + k.tunjangan + k.feeVcr + k.feeTransport - k.kasbon - k.denda - k.terlambat - k.lain;
+    const joined = employee.joinedAt ?? employee.createdAt;
+    k.register = joined.toLocaleDateString("id-ID", { month: "long", year: "numeric", timeZone: "UTC" }).toUpperCase();
+    karyawan = k;
+  }
+
+  const level = vcr ? (employee.level as EmployeeLevel) : null;
+  return {
+    karyawan,
+    variant,
+    daily,
+    employee: {
+      name: employee.name,
+      code: employee.code,
+      role: employee.role,
+      place: employee.homePlace,
+      level,
+      levelLabel: level ? VOUCHER_LABEL[level] : "GAJI",
+      nik: employee.nik ?? "",
+      phone: employee.phone ?? "",
+      email: employee.email ?? "",
+    },
+    manualRate,
+    month,
+    monthLabel: monthLabel(month),
+    rows,
+    sheet,
+    total: sheetTotal(sheet),
+    savings: savings.map((s) => ({ id: s.id, date: dLabel(s.date), amount: s.amount, note: s.note })),
+    attendance: {
+      hariHadir,
+      totalDays: daysInMonth(month),
+      persen: Math.round((hariHadir / daysInMonth(month)) * 100),
+      trackingStarted: month >= ATTENDANCE_CHECKIN_START_MONTH,
+    },
+  };
+}
+
+/**
+ * Auto-creates a Pinalty Absensi row the first time anyone opens a Tera's
+ * Slip Pay for a month that has already ended with fewer than
+ * ATTENDANCE_MIN_DAYS worked. Runs at most once per employee+month — the
+ * AttendancePenaltyCheck row marks the month as decided regardless of
+ * whether a penalty was actually warranted, or whether Owner later edits or
+ * deletes the row it created, so this never fights back against that
+ * decision on a later visit.
+ */
+export async function ensureAttendancePenalty(employeeId: string, month: string): Promise<void> {
+  if (month >= parseMonth(null)) return; // only evaluate months that have fully ended
+  // The self check-in box (source of Hari Hadir below) didn't exist before
+  // this month — an empty Attendance table there means "not tracked", not
+  // "0 hari hadir", so skip evaluating it entirely rather than penalize
+  // everyone retroactively for a feature that didn't exist yet.
+  if (month < ATTENDANCE_CHECKIN_START_MONTH) return;
+
+  const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
+  if (!employee || !usesVcr(employee.role)) return;
+  const joinedYm = `${employee.createdAt.getFullYear()}-${String(employee.createdAt.getMonth() + 1).padStart(2, "0")}`;
+  if (month < joinedYm) return; // wasn't employed yet that month
+
+  // Claim this employee+month first — the unique constraint is what makes
+  // this idempotent when two requests race (e.g. Owner and Consultant both
+  // opening the same Slip Pay at once). Whoever loses the race bails out
+  // here instead of both passing a "not yet decided" check and each
+  // creating their own Pinalty Absensi row.
+  try {
+    await prisma.attendancePenaltyCheck.create({ data: { employeeId, month } });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return;
+    throw e;
+  }
+
+  const daysPresent = await getAttendanceDaysCount(employeeId, month);
+
+  if (daysPresent < ATTENDANCE_MIN_DAYS) {
+    await prisma.payslipItem.create({
+      data: {
+        employeeId,
+        month,
+        date: null,
+        description: `Pinalty Absensi (kerja ${daysPresent}/${ATTENDANCE_MIN_DAYS} hari)`,
+        category: ATTENDANCE_PENALTY_CATEGORY,
+        qty: null,
+        debit: 0,
+        credit: ATTENDANCE_PENALTY_AMOUNT,
+        note: "Otomatis oleh sistem — bisa diedit atau dihapus Owner.",
+      },
+    });
+  }
+}
+
+/**
+ * Generates this month's PayslipItem for every RecurringCost (Admin, Mess,
+ * Dokter/Spekulo, Salon, Loker, Test Kehamilan/HIV-AIDS, Pinalty SOP) an
+ * employee has running, so a fee entered once keeps billing every month on
+ * its own. Each template can only ever produce one row per month — matched
+ * by recurringCostId, not category, so Owner deleting that one month's row
+ * doesn't stop the next month's from being generated. Deleting the
+ * RecurringCost itself is what actually stops future billing.
+ */
+export async function ensureRecurringCosts(employeeId: string, month: string): Promise<void> {
+  const recurring = await prisma.recurringCost.findMany({ where: { employeeId, startMonth: { lte: month } } });
+  if (recurring.length === 0) return;
+
+  const existing = await prisma.payslipItem.findMany({
+    where: { employeeId, month, recurringCostId: { in: recurring.map((r) => r.id) } },
+    select: { recurringCostId: true },
+  });
+  const already = new Set(existing.map((e) => e.recurringCostId));
+
+  for (const rc of recurring) {
+    if (already.has(rc.id)) continue;
+    await prisma.payslipItem.create({
+      data: {
+        employeeId,
+        month,
+        date: null,
+        description: rc.category,
+        category: rc.category,
+        qty: null,
+        debit: 0,
+        credit: rc.amount,
+        note: rc.note,
+        recurringCostId: rc.id,
+      },
+    });
+  }
+}
+
+const PAYSLIP_MONTH_WINDOW = 5;
+
+/**
+ * The current month plus up to 4 before it, newest first — capped so an
+ * employee/Tera can never browse back past the calendar month they were
+ * registered in, even though the window would otherwise reach further.
+ */
+export async function listPayslipMonths(employeeId: string): Promise<string[]> {
+  const employee = await prisma.employee.findUnique({ where: { id: employeeId }, select: { createdAt: true } });
+  const toYm = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const now = new Date();
+  const joinedYm = employee ? toYm(employee.createdAt) : toYm(now);
+
+  const months: string[] = [];
+  for (let i = 0; i < PAYSLIP_MONTH_WINDOW; i++) {
+    const ym = toYm(new Date(now.getFullYear(), now.getMonth() - i, 1));
+    if (ym < joinedYm) break;
+    months.push(ym);
+  }
+  return months;
+}

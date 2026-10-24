@@ -1,0 +1,132 @@
+"use client";
+
+import { useRef, useState } from "react";
+import { btnPrimaryClass } from "@/components/ui/styles";
+
+interface ImportResult {
+  created: number;
+  alreadyMarked: number;
+  errors: { row: number; info: string; error: string }[];
+  // Only for the monthly report format (one sheet per month).
+  format?: "laporan-bulanan";
+  skippedFuture?: number;
+  sheets?: { sheet: string; label: string; people: number; created: number; alreadyMarked: number }[];
+}
+
+/**
+ * Bulk backfill for Absensi Harian — Excel/CSV/Text, same three formats as
+ * the other importers (see /api/admin/absensi/import). Each row marks one
+ * karyawan/Tera present on one date.
+ */
+export default function BulkImportAbsensi({ onImported }: { onImported: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function upload() {
+    if (!file) return;
+    setBusy(true);
+    setMsg("");
+    setResult(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/admin/absensi/import", { method: "POST", body });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.error ?? "Gagal mengimpor file.");
+        return;
+      }
+      setResult(data);
+      setFile(null);
+      if (inputRef.current) inputRef.current.value = "";
+      onImported();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-4">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="py-1.5 px-3 bg-transparent border border-ar-line rounded-[9px] text-ar-dim text-[10.5px] tracking-[0.08em] cursor-pointer hover:text-ar-gold"
+      >
+        📁 Import massal (Excel/CSV/Text) {open ? "▲" : "▼"}
+      </button>
+
+      {open && (
+        <div className="mt-2.5 p-4 bg-ar-surface border border-ar-goldline rounded-2xl">
+          <div className="text-[11px] text-ar-dim mb-3 leading-[1.6]">
+            Untuk backfill absen yang lupa di-tap, atau catatan kehadiran dari kertas — satu baris per karyawan/Tera
+            per tanggal. Laporan bulanan Excel (satu sheet per bulan, kolom tanggal 1–31, angka = hadir) juga bisa
+            diupload apa adanya.{" "}
+            {/* File download from a route handler, not a page: next/link would client-navigate to it. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/api/admin/absensi/import" className="text-ar-gold underline">
+              Unduh template kolomnya di sini
+            </a>
+            .
+          </div>
+          <label
+            htmlFor="absensi-import-file"
+            className="flex flex-col items-center justify-center gap-1.5 w-full py-6 px-4 mb-3 bg-ar-input border-2 border-dashed border-ar-goldline rounded-[14px] text-center cursor-pointer hover:bg-ar-surface2 transition"
+          >
+            <span className="text-[13px] text-ar-gold2 font-semibold">{file ? "📄 " + file.name : "📁 Ketuk untuk pilih file"}</span>
+            <span className="text-[10.5px] text-ar-dim">
+              {file ? "Ketuk lagi untuk ganti file" : "Dari galeri/file di HP, atau folder di komputer · .xlsx / .xls / .csv / .txt"}
+            </span>
+          </label>
+          <input
+            ref={inputRef}
+            id="absensi-import-file"
+            type="file"
+            accept=".xlsx,.xls,.csv,.txt"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="hidden"
+          />
+          <button
+            disabled={busy || !file}
+            onClick={upload}
+            className={`${btnPrimaryClass} w-full py-2.5 px-4`}
+          >
+            {busy ? "Memproses…" : "Upload & Impor"}
+          </button>
+          {msg && <div className="mt-3 text-[11.5px] text-ar-red">{msg}</div>}
+          {result && (
+            <div className="mt-3.5 p-3.5 bg-[rgba(127,209,168,.1)] border border-[rgba(127,209,168,.3)] rounded-xl text-[11.5px] text-ar-green leading-[1.7]">
+              ✓ {result.created} absen baru tercatat
+              {result.alreadyMarked > 0 && ` · ${result.alreadyMarked} sudah tercatat sebelumnya`}
+              {!!result.skippedFuture && ` · ${result.skippedFuture} tanggal belum terjadi dilewati`}.
+              {result.sheets && result.sheets.length > 0 && (
+                <ul className="mt-1.5 list-disc list-inside text-ar-dim">
+                  {result.sheets.map((sh) => (
+                    <li key={sh.sheet}>
+                      {sh.sheet} ({sh.label}): {sh.people} orang · {sh.created} baru
+                      {sh.alreadyMarked > 0 && ` · ${sh.alreadyMarked} sudah ada`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {result.errors.length > 0 && (
+                <div className="text-ar-faint mt-2">
+                  {result.errors.length} {result.format ? "nama" : "baris"} dilewati karena error:
+                  <ul className="mt-1 list-disc list-inside">
+                    {result.errors.map((e, i) => (
+                      <li key={i}>
+                        {result.format ? e.error : `Baris ${e.row} (${e.info}): ${e.error}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

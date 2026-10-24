@@ -1,0 +1,311 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import DesktopStatusBar from "@/components/DesktopStatusBar";
+
+type Portal = "karyawan" | "pusat";
+type Step = "id" | "otp" | "gps";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [portal, setPortal] = useState<Portal>("karyawan");
+  const [step, setStep] = useState<Step>("id");
+  const [loginId, setLoginId] = useState("");
+  const [otp, setOtp] = useState("");
+  const [error, setError] = useState("");
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
+  const [delivered, setDelivered] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [desktopOffline, setDesktopOffline] = useState(false);
+
+  useEffect(() => {
+    window.arcorpDesktop?.getMode().then((mode) => {
+      if (mode === "offline") {
+        setDesktopOffline(true);
+        setPortal("pusat");
+      }
+    });
+  }, []);
+
+  function pickPortal(p: Portal) {
+    if (desktopOffline && p === "karyawan") return;
+    setPortal(p);
+    setLoginId("");
+    setStep("id");
+    setError("");
+    setDevCode(null);
+    setIsDemo(false);
+    setDelivered(false);
+  }
+
+  async function sendOtp() {
+    if (!loginId.trim()) {
+      setError("Masukkan email terdaftar atau nomor HP.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/request-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: loginId, portal }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Gagal mengirim kode.");
+        return;
+      }
+      setDevCode(data.devCode ?? null);
+      setIsDemo(Boolean(data.isDemo));
+      setDelivered(Boolean(data.delivered));
+      setOtp("");
+      setStep("otp");
+    } catch {
+      setError("Tidak bisa terhubung ke server. Periksa koneksi internet dan coba lagi.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyOtp() {
+    if (otp.length < 6) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: loginId, code: otp, portal }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Kode salah.");
+        return;
+      }
+      if (data.requiresAttendance) {
+        beginAttendance();
+      } else if (data.accessRole === "SUPERVISOR") {
+        router.push("/admin/lapor-lapangan");
+      } else {
+        router.push("/admin");
+      }
+    } catch {
+      setError("Tidak bisa terhubung ke server. Periksa koneksi internet dan coba lagi.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Silent check-in: the position is read and the attendance recorded in the background, then the
+  // employee goes straight into the app — no GPS wording is shown.
+  function beginAttendance() {
+    setStep("gps");
+
+    const finish = (lat?: number, lng?: number) =>
+      fetch("/api/attendance/checkin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat, lng }),
+      })
+        .catch(() => {})
+        .finally(() => router.push("/app"));
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (p) => finish(p.coords.latitude, p.coords.longitude),
+        () => finish(undefined, undefined),
+        { timeout: 6000 }
+      );
+    } else {
+      finish(undefined, undefined);
+    }
+  }
+
+  return (
+    <div className="min-h-screen grid place-items-center p-4 sm:p-8 ar-glow-corners ar-stars">
+      <DesktopStatusBar />
+      <div className="w-full max-w-[380px] ar-in">
+        <div className="flex flex-col items-center mb-5">
+          <div className="relative">
+            <div
+              className="absolute -inset-5 rounded-full opacity-80 blur-xl pointer-events-none"
+              style={{ background: "radial-gradient(circle, rgba(var(--ar-accent-rgb),0.28), transparent 70%)" }}
+            />
+            <Image
+              src="/api/brand-logo"
+              alt="AR Corp"
+              width={128}
+              height={128}
+              priority
+              unoptimized
+              className="relative w-[112px] h-[112px] sm:w-[128px] sm:h-[128px] object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.6)]"
+            />
+          </div>
+          <div className="mt-3 font-display text-[15px] tracking-[0.38em] uppercase font-semibold text-center">
+            <span className="ar-shimmer-gold">E-Management</span>
+          </div>
+          <div className="text-[10px] tracking-[0.2em] text-ar-dim mt-1.5 uppercase text-center">
+            Portal operasional &middot; Slip pay
+          </div>
+        </div>
+
+        <div className="ar-frame-luxury bg-ar-surface rounded-[18px] px-5 pt-5 pb-5">
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-ar-surface2 rounded-xl mb-4">
+            <button
+              onClick={() => pickPortal("karyawan")}
+              disabled={desktopOffline}
+              className={`py-[9px] rounded-[9px] text-[11px] font-semibold tracking-[0.14em] uppercase transition ${
+                desktopOffline ? "opacity-35 cursor-not-allowed" : "cursor-pointer"
+              } ${portal === "karyawan" ? "ar-tab-active-gold shadow-[inset_0_0_0_1px_var(--ar-truegold-line)]" : "text-ar-dim"}`}
+            >
+              STAFF &amp; PR
+            </button>
+            <button
+              onClick={() => pickPortal("pusat")}
+              className={`py-[9px] rounded-[9px] text-[11px] font-semibold tracking-[0.14em] uppercase cursor-pointer transition ${
+                portal === "pusat" ? "ar-tab-active-gold shadow-[inset_0_0_0_1px_var(--ar-truegold-line)]" : "text-ar-dim"
+              }`}
+            >
+              OFFICE
+            </button>
+          </div>
+          {desktopOffline && (
+            <div className="text-[10px] text-ar-faint mb-[14px] leading-[1.5]">
+              Mode offline kantor: hanya login Admin/Owner/Kepala Mess. Karyawan tetap pakai aplikasi HP.
+            </div>
+          )}
+
+          {step === "id" && (
+            <div>
+              <div className="relative">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="absolute left-[14px] top-1/2 -translate-y-1/2 w-4 h-4 text-ar-truegold opacity-75 pointer-events-none"
+                >
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="M3 7l9 6 9-6" />
+                </svg>
+                <input
+                  value={loginId}
+                  onChange={(e) => {
+                    setLoginId(e.target.value);
+                    setError("");
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && sendOtp()}
+                  placeholder="Email atau nomor HP"
+                  className="w-full py-[13px] pl-11 pr-4 bg-ar-input border border-ar-goldline rounded-[11px] text-ar-text text-[13px] text-left"
+                />
+              </div>
+              <div className="min-h-[19px] text-[11.5px] text-ar-red mt-2">{error}</div>
+              <button
+                disabled={busy}
+                onClick={sendOtp}
+                className="w-full py-[13px] ar-grad rounded-[11px] text-ar-ongold text-xs font-bold tracking-[0.16em] uppercase cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                <span>Kirim Kode Verifikasi</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3.5 h-3.5 shrink-0"
+                >
+                  <path d="M5 12h14" />
+                  <path d="M13 6l6 6-6 6" />
+                </svg>
+              </button>
+              <div className="mt-4 pt-3.5 border-t border-ar-line flex items-center justify-center gap-1.5 text-[11px] leading-[1.6] text-ar-dim text-center">
+                <svg viewBox="0 0 24 24" fill="#25D366" className="w-3.5 h-3.5 shrink-0">
+                  <path d="M12 2C6.477 2 2 6.477 2 12c0 1.9.525 3.68 1.438 5.2L2 22l4.938-1.395A9.94 9.94 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm4.472 12.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.148.198 2.095 3.2 5.076 4.487.71.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
+                </svg>
+                <span>Kode dikirim ke email/WhatsApp terdaftar.</span>
+              </div>
+            </div>
+          )}
+
+          {step === "otp" && (
+            <div>
+              <div className="text-[12.5px] leading-[1.6] text-ar-dim mb-4">
+                Kode 6 angka dikirim ke <span className="text-ar-gold">{loginId}</span>
+              </div>
+              {devCode && (
+                <div className="mb-3 py-2 px-3 rounded-lg border border-ar-goldline bg-ar-goldfill text-ar-gold2 text-[12px] text-center tracking-[0.1em]">
+                  {isDemo ? "Akun demo — kode Anda: " : "Mode pengembangan — kode Anda: "}
+                  <strong>{devCode}</strong>
+                </div>
+              )}
+              {delivered && (
+                <div className="mb-3 py-2 px-3 rounded-lg border border-[rgba(127,209,168,.3)] bg-[rgba(127,209,168,.1)] text-ar-green text-[12px] text-center">
+                  Kode terkirim ke {loginId.includes("@") ? "email" : "nomor HP"} Anda.
+                </div>
+              )}
+              <input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                onKeyDown={(e) => e.key === "Enter" && verifyOtp()}
+                placeholder="••••••"
+                className="w-full py-[15px] bg-ar-input border border-ar-goldline rounded-[11px] text-ar-text text-[22px] tracking-[0.5em] text-center font-display"
+              />
+              <div className="min-h-[19px] text-[11.5px] text-ar-red mt-2">{error}</div>
+              <button
+                disabled={busy || otp.length < 6}
+                onClick={verifyOtp}
+                className="w-full mt-[14px] py-[13px] ar-grad rounded-[11px] text-ar-ongold text-xs font-bold tracking-[0.18em] uppercase cursor-pointer disabled:opacity-60"
+              >
+                Verifikasi &amp; Masuk
+              </button>
+              <button
+                onClick={() => {
+                  setStep("id");
+                  setOtp("");
+                  setError("");
+                }}
+                className="w-full mt-[9px] py-[11px] bg-transparent text-ar-dim text-[11.5px] cursor-pointer"
+              >
+                Ganti email / nomor
+              </button>
+            </div>
+          )}
+
+          {step === "gps" && (
+            <div className="grid place-items-center py-6">
+              <span className="w-[9px] h-[9px] rounded-full bg-ar-gold ar-pulse" aria-label="Memproses masuk" />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 text-center">
+          <div className="text-[9.5px] tracking-[0.3em] uppercase ar-shimmer-gold font-semibold">
+            Professional &middot; Trusted &middot; Together
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 text-[10.5px] text-ar-faint">
+          <span>Unduh:</span>
+          <a href="/downloads/arcorp.apk" download className="text-ar-gold underline-offset-4 hover:underline">
+            Android (APK)
+          </a>
+          <span aria-hidden="true">&middot;</span>
+          <a
+            href="https://github.com/emanagementrecruitment-ekhy/ekhy-arcorp-ar-corp-hr/releases/latest/download/AR-Corp-Desktop-Setup.exe"
+            title="AR Corp Desktop untuk Admin/Owner/Kepala Mess — bisa dipakai offline saat internet kantor mati."
+            className="text-ar-gold underline-offset-4 hover:underline"
+          >
+            Windows (Desktop)
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}

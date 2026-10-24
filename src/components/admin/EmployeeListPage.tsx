@@ -1,0 +1,499 @@
+"use client";
+
+import { cachedJson, clearCachedJson } from "@/lib/client-cache";
+import { useEffect, useRef, useState } from "react";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import EditEmployeeForm from "@/components/admin/EditEmployeeForm";
+import AddEmployeeForm from "@/components/admin/AddEmployeeForm";
+import BulkImportEmployees from "@/components/admin/BulkImportEmployees";
+import OwnerCodeBox from "@/components/admin/OwnerCodeBox";
+import { VOUCHER_LABEL, usesVcr, type EmployeeLevel } from "@/lib/constants";
+import { isLink, shortRp } from "@/lib/format";
+import { joinedLabel } from "@/lib/joined-date";
+
+interface EmpRow {
+  id: string;
+  name: string;
+  code: string;
+  role: string;
+  status: "AKTIF" | "RESIGN";
+  level: EmployeeLevel | null;
+  customRate: number | null;
+  salary: number | null;
+  ageYears: number | null;
+  weightKg: number | null;
+  heightCm: number | null;
+  email: string;
+  phone: string;
+  place: string;
+  supervisorId: string;
+  channelLink: string;
+  joinedAt: string | null;
+  supervisorNote: string;
+  nik: string;
+  birthPlace: string | null;
+  birthDate: string | null;
+  hasPhoto: boolean;
+  hadirPct: number;
+  count: string;
+  kasbon: string;
+  bonusFee: string;
+  total: string;
+}
+
+interface SupervisorOption {
+  id: string;
+  name: string;
+  code: string;
+}
+
+/** Shared list+edit table behind Data Tera and Data Karyawan — same data, filtered server-side by role via `type`. Adding is done from the small buttons at the top right (Tambah Staff on Data Karyawan, Tambah Terapis on Data Tera, plus a compact bulk import). */
+export default function EmployeeListPage({
+  type,
+  title,
+  emptyLabel,
+}: {
+  type: "tera" | "staff";
+  title: string;
+  emptyLabel: string;
+}) {
+  const [rows, setRows] = useState<EmpRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [query, setQuery] = useState("");
+  const [statusTab, setStatusTab] = useState<"AKTIF" | "RESIGN">("AKTIF");
+  const [canEdit, setCanEdit] = useState(false);
+  const [supervisors, setSupervisors] = useState<SupervisorOption[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteMsg, setDeleteMsg] = useState("");
+  const [notice, setNotice] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [resignRow, setResignRow] = useState<EmpRow | null>(null);
+  const noun = type === "tera" ? "Terapis" : "Staff";
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showNotice(text: string, ms: number) {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = setTimeout(() => {
+      setNotice("");
+      noticeTimer.current = null;
+    }, ms);
+  }
+
+  const SUPERVISORS_URL = "/api/admin/employees?pageSize=500&lite=1";
+  // `fresh` skips the shared cache — used after adding/editing someone, so a new Kepala Mess shows up at once.
+  function loadSupervisors(fresh = false) {
+    if (fresh) clearCachedJson(SUPERVISORS_URL);
+    cachedJson(SUPERVISORS_URL)
+      .then((d) =>
+        setSupervisors(
+          (d.employees ?? [])
+            .filter((e: EmpRow) => e.role === "Kepala Mess")
+            .map((e: EmpRow) => ({ id: e.id, name: e.name, code: e.code }))
+        )
+      );
+  }
+
+  function loadPage(p: number, q: string, status: "AKTIF" | "RESIGN" = statusTab) {
+    const params = new URLSearchParams({ page: String(p), type, status });
+    if (q) params.set("q", q);
+    fetch(`/api/admin/employees?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setRows(d.employees ?? []);
+        setTotal(d.total ?? 0);
+        setPage(d.page ?? 1);
+        setTotalPages(d.totalPages ?? 1);
+      });
+  }
+
+  useEffect(() => {
+    loadPage(1, "", statusTab);
+    loadSupervisors();
+    cachedJson("/api/auth/session")
+      .then((d) => setCanEdit(["OWNER", "CONSULTANT", "MANAGER"].includes(d.session?.accessRole)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, statusTab]);
+
+  useEffect(() => {
+    const t = setTimeout(() => loadPage(1, query), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  function onSaved() {
+    setEditingId(null);
+    showNotice("✓ Perubahan disimpan.", 2500);
+    loadPage(page, query);
+    loadSupervisors(true);
+  }
+
+  /** Returns an error message, or null once deleted. The Owner's emailed code is required. */
+  async function confirmDelete(row: EmpRow, ownerCode: string): Promise<string | null> {
+    setDeleteMsg("");
+    const res = await fetch(`/api/admin/employees/${row.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ownerCode }),
+    });
+    const data = await res.json();
+    if (!res.ok) return data.error ?? "Gagal menghapus karyawan.";
+    setConfirmDeleteId(null);
+    const reassigned = data.reassignedReports ? ` ${data.reassignedReports} anak buahnya dipindahkan ke "Tidak ada supervisor".` : "";
+    showNotice(`✓ ${row.name} (${row.code}) dihapus.${reassigned}`, 4000);
+    loadPage(page, query);
+    loadSupervisors(true);
+    return null;
+  }
+
+  /** Returns an error message, or null on success. Marking RESIGN needs the Owner's emailed code. */
+  async function toggleStatus(row: EmpRow, status: "AKTIF" | "RESIGN", ownerCode?: string): Promise<string | null> {
+    setDeleteMsg("");
+    const res = await fetch(`/api/admin/employees/${row.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, ownerCode }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data.error ?? "Gagal mengubah status.";
+      setDeleteMsg(msg);
+      return msg;
+    }
+    setResignRow(null);
+    showNotice(
+      status === "RESIGN"
+        ? `✓ ${row.name} (${row.code}) ditandai resign — tidak bisa login lagi, tapi riwayatnya tetap tersimpan.`
+        : `✓ ${row.name} (${row.code}) diaktifkan kembali.`,
+      4000
+    );
+    loadPage(page, query);
+    loadSupervisors(true);
+    return null;
+  }
+
+  // minmax(0, …) lets long emails/links wrap instead of pushing the table wider than the page.
+  // Staff (gaji) and Tera (voucher) have different pay columns, so each gets its own grid.
+  const isStaff = type === "staff";
+  const cols = isStaff
+    ? canEdit
+      ? "minmax(0,1.2fr) minmax(0,.9fr) minmax(0,.7fr) minmax(0,1.8fr) minmax(0,.9fr) minmax(0,.7fr) minmax(0,.8fr) minmax(0,.9fr) 150px"
+      : "minmax(0,1.4fr) minmax(0,1fr) minmax(0,.9fr) minmax(0,1.6fr) minmax(0,1fr) minmax(0,.9fr) minmax(0,1fr) minmax(0,1.1fr)"
+    : canEdit
+      ? "minmax(0,1.3fr) minmax(0,.9fr) minmax(0,.8fr) minmax(0,1.5fr) minmax(0,.95fr) minmax(0,1fr) minmax(0,.7fr) minmax(0,1fr) 150px"
+      : "minmax(0,1.4fr) minmax(0,1fr) minmax(0,.9fr) minmax(0,1.6fr) minmax(0,.9fr) minmax(0,1.1fr) minmax(0,.9fr) minmax(0,1.1fr)";
+
+  return (
+    <div>
+      <AdminPageHeader
+        title={title}
+        subtitle={`${total} terdaftar · login dengan email atau nomor HP`}
+      />
+
+      <div className="pt-5.5">
+        <AddEmployeeForm
+          kind={type}
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          supervisors={supervisors}
+          onCreated={() => {
+            loadPage(1, query);
+            loadSupervisors(true);
+          }}
+        />
+        <BulkImportEmployees
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            loadPage(1, query);
+            loadSupervisors(true);
+          }}
+        />
+
+        <div className="flex flex-wrap items-center gap-2 mb-3.5">
+          {(["AKTIF", "RESIGN"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusTab(s)}
+              className={`py-1.5 px-3.5 rounded-full text-[11px] font-medium cursor-pointer border ${
+                statusTab === s
+                  ? "bg-ar-gold text-black border-ar-gold"
+                  : "bg-transparent text-ar-dim border-ar-line"
+              }`}
+            >
+              {s === "AKTIF" ? "Aktif" : "Resign"}
+            </button>
+          ))}
+          <span className="flex-1" />
+          <button
+            onClick={() => {
+              setAddOpen((v) => !v);
+              setImportOpen(false);
+            }}
+            className="py-2 px-3.5 ar-grad rounded-[10px] text-ar-ongold text-[10.5px] font-bold tracking-[0.12em] uppercase cursor-pointer whitespace-nowrap"
+          >
+            + Tambah {noun}
+          </button>
+          <button
+            onClick={() => {
+              setImportOpen((v) => !v);
+              setAddOpen(false);
+            }}
+            className="py-2 px-2.5 bg-transparent border border-ar-line rounded-[9px] text-ar-dim text-[10.5px] cursor-pointer whitespace-nowrap"
+            title="Import massal"
+          >
+            📁 Import
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-3 justify-between items-center mb-3.5">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari nama, kode, email, atau nomor HP…"
+            className="flex-1 min-w-[220px] py-2.5 px-3.5 bg-ar-input border border-ar-goldline rounded-[10px] text-ar-text text-[12.5px]"
+          />
+        </div>
+
+        {confirmDeleteId && rows.find((r) => r.id === confirmDeleteId) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <OwnerCodeBox
+              title={`Hapus ${rows.find((r) => r.id === confirmDeleteId)!.name}?`}
+              hint="Menghapus data karyawan/Tera bersifat permanen (riwayat voucher dan kasbonnya ikut terhapus). Perlu kode yang dikirim ke email Owner."
+              actionLabel="Ya, Hapus"
+              onConfirm={(code) => confirmDelete(rows.find((r) => r.id === confirmDeleteId)!, code)}
+              onCancel={() => setConfirmDeleteId(null)}
+            />
+          </div>
+        )}
+
+        {resignRow && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <OwnerCodeBox
+              title={`Tandai ${resignRow.name} resign?`}
+              hint="Akun ini tidak bisa login lagi, tetapi riwayat voucher, absensi, dan slipnya tetap tersimpan (bisa diaktifkan kembali). Perlu kode yang dikirim ke email Owner."
+              actionLabel="Ya, Resign"
+              onConfirm={(code) => toggleStatus(resignRow, "RESIGN", code)}
+              onCancel={() => setResignRow(null)}
+            />
+          </div>
+        )}
+
+        {notice && (
+          <div className="mb-3.5 py-3 px-4 bg-[rgba(127,209,168,.1)] border border-[rgba(127,209,168,.3)] rounded-xl text-ar-green text-[12px]">
+            {notice}
+          </div>
+        )}
+
+        <div className="bg-ar-surface border border-ar-line rounded-2xl overflow-x-auto">
+          <div className="min-w-[840px]">
+          <div
+            className="grid gap-3 py-3.5 px-4.5 bg-ar-surface2 text-[10px] tracking-[0.12em] uppercase text-ar-dim items-center leading-snug"
+            style={{ gridTemplateColumns: cols }}
+          >
+            <span>Karyawan</span>
+            <span>Outlet</span>
+            <span>{isStaff ? "Gaji" : "Jumlah VCR"}</span>
+            <span>Kontak</span>
+            <span>Presentase Hadir</span>
+            {isStaff ? (
+              <>
+                <span>Kasbon</span>
+                <span>Bonus/Fee</span>
+              </>
+            ) : (
+              <>
+                <span>Bergabung</span>
+                <span>Kasbon</span>
+              </>
+            )}
+            <span>Total Pendapatan</span>
+            {canEdit && <span>Aksi</span>}
+          </div>
+          {rows.length === 0 && (
+            <div className="py-8 px-4.5 text-center text-[12.5px] text-ar-faint">
+              {query
+                ? `Tidak ada yang cocok dengan "${query}".`
+                : statusTab === "RESIGN"
+                  ? "Belum ada yang ditandai resign."
+                  : emptyLabel}
+            </div>
+          )}
+          {rows.map((e) =>
+            editingId === e.id ? (
+              <div key={e.code} className="px-4.5 border-t border-ar-line">
+                <EditEmployeeForm
+                  employee={{
+                    id: e.id,
+                    code: e.code,
+                    name: e.name,
+                    email: e.email,
+                    phone: e.phone,
+                    level: e.level,
+                    customRate: e.customRate,
+                    salary: e.salary,
+                    ageYears: e.ageYears,
+                    weightKg: e.weightKg,
+                    heightCm: e.heightCm,
+                    role: e.role,
+                    place: e.place,
+                    supervisorId: e.supervisorId,
+                    joinedAt: e.joinedAt,
+                    nik: e.nik,
+                    birthPlace: e.birthPlace,
+                    birthDate: e.birthDate,
+                  }}
+                  supervisors={supervisors}
+                  onSaved={onSaved}
+                  onCancel={() => setEditingId(null)}
+                />
+              </div>
+            ) : (
+              <div
+                key={e.code}
+                className="grid gap-3 py-3.5 px-4.5 border-t border-ar-line text-[12px] items-center text-left"
+                style={{ gridTemplateColumns: cols }}
+              >
+                <span>
+                  <span className="block">{e.name}</span>
+                  <span className="block text-[10.5px] text-ar-dim mt-1">
+                    {e.code} ·{" "}
+                    {isLink(e.role) ? (
+                      <a href={e.role} target="_blank" rel="noopener noreferrer" className="text-ar-gold underline">
+                        {e.role}
+                      </a>
+                    ) : (
+                      e.role
+                    )}
+                  </span>
+                  {(e.ageYears || e.weightKg || e.heightCm) && (
+                    <span className="block text-[10.5px] text-ar-faint mt-0.5">
+                      {[e.ageYears && `${e.ageYears} thn`, e.weightKg && `${e.weightKg} kg`, e.heightCm && `${e.heightCm} cm`]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  )}
+                </span>
+                <span className="text-[12px] text-ar-text break-words">{e.place}</span>
+                {isStaff ? (
+                  <span className="text-[12px]">{e.salary ? shortRp(e.salary) : <span className="text-ar-faint">—</span>}</span>
+                ) : (
+                  <span>
+                    <span className="block text-[12px]">{e.count}</span>
+                    <span className={`block text-[10.5px] mt-0.5 ${e.level === "PLATINUM" || e.level === "MODEL" ? "text-ar-gold2" : "text-ar-dim"}`}>
+                      {usesVcr(e.role) ? VOUCHER_LABEL[e.level as EmployeeLevel] : "GAJI"}
+                    </span>
+                  </span>
+                )}
+                <span className="text-[11px] text-ar-dim leading-[1.6] break-all">
+                  {e.email}
+                  <br />
+                  {e.phone}
+                  {e.supervisorNote && (
+                    <>
+                      <br />
+                      Sup: {e.supervisorNote}
+                    </>
+                  )}
+                  {e.nik && (
+                    <>
+                      <br />
+                      <span className="whitespace-nowrap text-[10.5px]">NIK {e.nik}</span>
+                    </>
+                  )}
+                </span>
+                <span className="text-[12px]">{e.hadirPct}%</span>
+                {isStaff ? (
+                  <>
+                <span className={`text-[12px] ${e.kasbon !== "—" ? "text-ar-red" : "text-ar-faint"}`}>{e.kasbon}</span>
+                    <span className={`text-[12px] ${e.bonusFee !== "—" ? "text-ar-green" : "text-ar-faint"}`}>{e.bonusFee}</span>
+                  </>
+                ) : (
+                  <>
+                <span className="text-[11px]">{joinedLabel(e.joinedAt)}</span>
+                <span className={`text-[12px] ${e.kasbon !== "—" ? "text-ar-red" : "text-ar-faint"}`}>{e.kasbon}</span>
+                  </>
+                )}
+                <span className="font-display text-[15px] text-ar-gold2 whitespace-nowrap">{e.total}</span>
+                {canEdit &&
+                  (confirmDeleteId === e.id ? (
+                    <span className="text-[10.5px] text-ar-red">Menunggu kode Owner…</span>
+                  ) : (
+                    <span className="flex gap-2.5 whitespace-nowrap">
+                      <button
+                        onClick={() => {
+                          setEditingId(e.id);
+                          setConfirmDeleteId(null);
+                        }}
+                        className="text-[11px] text-ar-gold cursor-pointer"
+                      >
+                        Edit
+                      </button>
+                      {statusTab === "AKTIF" ? (
+                        <button
+                          onClick={() => setResignRow(e)}
+                          className="text-[11px] text-ar-dim cursor-pointer"
+                        >
+                          Resign
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => void toggleStatus(e, "AKTIF")}
+                          className="text-[11px] text-ar-green cursor-pointer"
+                        >
+                          Aktifkan
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setConfirmDeleteId(e.id)}
+                        className="text-[11px] text-ar-red cursor-pointer"
+                      >
+                        Hapus
+                      </button>
+                    </span>
+                  ))}
+              </div>
+            )
+          )}
+          </div>
+        </div>
+
+        {deleteMsg && <div className="mt-2.5 text-[11.5px] text-ar-red">{deleteMsg}</div>}
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-3.5 text-[11.5px] text-ar-dim">
+            <button
+              disabled={page <= 1}
+              onClick={() => loadPage(page - 1, query)}
+              className="py-2 px-3.5 bg-ar-surface2 border border-ar-line rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-default"
+            >
+              ← Sebelumnya
+            </button>
+            <span>
+              Halaman {page} dari {totalPages}
+            </span>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => loadPage(page + 1, query)}
+              className="py-2 px-3.5 bg-ar-surface2 border border-ar-line rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-default"
+            >
+              Berikutnya →
+            </button>
+          </div>
+        )}
+
+        <div className="mt-3.5 py-4 px-4.5 bg-ar-surface2 border border-ar-line rounded-2xl text-[11.5px] leading-[1.75] text-ar-dim">
+          Hak akses: <span className="text-ar-gold">Owner</span> dan <span className="text-ar-gold">Admin</span> dapat menambahkan
+          data lewat tombol <b>+ Tambah</b> di sebelah tab Aktif/Resign (kode Staff berawalan AR-, Terapis EQ-).{" "}
+          <span className="text-ar-gold">Owner</span>, Konsultan, dan Manager dapat mengedit data, menandai resign, dan menghapus —
+          <b> Resign dan Hapus</b> selalu meminta kode konfirmasi yang dikirim ke email Owner. Perubahan nilai voucher dan
+          persetujuan kasbon tetap di tangan Owner dan Manager.
+        </div>
+      </div>
+    </div>
+  );
+}

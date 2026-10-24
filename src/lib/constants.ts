@@ -1,0 +1,302 @@
+// Enum-like string values for SQLite columns (see prisma/schema.prisma header comment).
+
+export const ACCESS_ROLES = ["KARYAWAN", "OWNER", "CONSULTANT", "ADMIN_PUSAT", "SUPERVISOR", "MANAGER"] as const;
+export type AccessRole = (typeof ACCESS_ROLES)[number];
+
+/**
+ * Everyone who is on the payroll/roster: plain karyawan plus anyone appointed to Admin Pusat, Kepala Mess or Manager.
+ * Appointing someone only changes their access, never their place in Data Karyawan, slip pay or the salary totals.
+ * OWNER/CONSULTANT are system accounts and stay out of the roster.
+ */
+export const STAFF_ROLES = ["KARYAWAN", "ADMIN_PUSAT", "SUPERVISOR", "MANAGER"] as const;
+export function isStaffRole(role: string | null | undefined): boolean {
+  return !!role && (STAFF_ROLES as readonly string[]).includes(role);
+}
+
+// A resigned employee/Tera can't log in and drops out of the active Data
+// Karyawan/Data Tera list, but keeps their voucher/absensi/slip pay history
+// intact for reports — the non-destructive alternative to deleting them
+// outright (see DELETE /api/admin/employees/[id]).
+export const EMPLOYEE_STATUSES = ["AKTIF", "RESIGN"] as const;
+export type EmployeeStatus = (typeof EMPLOYEE_STATUSES)[number];
+
+// Full admin data access (Karyawan, Kasbon, Laporan, Lokasi & Absensi, ...).
+// SUPERVISOR (Kepala Mess) is deliberately excluded — it's a narrower,
+// view-only role scoped to Laporan Lapangan only (see requireSession calls
+// in src/app/api/admin/lapor/route.ts and src/app/admin/layout.tsx).
+// MANAGER carries the same office access as OWNER everywhere in the app —
+// the one deliberate exception is the Owner Identity feature itself (see
+// /api/admin/owner-identity, /api/admin/owner-identity/logo, and
+// /dev/nav-layout), which stays OWNER/CONSULTANT/ADMIN_PUSAT-only so a
+// Manager can never view or replace the real Owner's identity.
+export const OFFICE_ROLES: AccessRole[] = ["OWNER", "CONSULTANT", "ADMIN_PUSAT", "MANAGER"];
+
+// Every role that should hear about day-to-day activity (new chat/report,
+// voucher/pendapatan entries, a Tera login) — OFFICE_ROLES plus SUPERVISOR
+// (Kepala Mess), who's otherwise scoped to Laporan Lapangan only. See
+// src/lib/notify.ts.
+export const NOTIFY_ROLES: AccessRole[] = ["OWNER", "CONSULTANT", "ADMIN_PUSAT", "SUPERVISOR", "MANAGER"];
+
+// Ordered lowest to highest pendapatan/VCR — drives dropdown display order.
+// MANUAL sits last: it has no fixed rate (see VOUCHER_AMOUNT and
+// employeeRate() below — its real rate lives on Employee.customRate).
+export const EMPLOYEE_LEVELS = ["CLASSIC_D", "FL", "SILVER", "GOLD", "LB", "PLATINUM", "LV", "MODEL", "MANUAL"] as const;
+export type EmployeeLevel = (typeof EMPLOYEE_LEVELS)[number];
+
+export const VOUCHER_STATUSES = ["MENUNGGU_VALIDASI", "TERVALIDASI", "DICAIRKAN"] as const;
+export type VoucherStatus = (typeof VOUCHER_STATUSES)[number];
+
+export const KASBON_STATUSES = ["MENUNGGU_OWNER", "DISETUJUI", "DITOLAK"] as const;
+export type KasbonStatus = (typeof KASBON_STATUSES)[number];
+
+// MANUAL's 0 here is a placeholder — always resolve an employee's actual
+// rate through employeeRate() below, which substitutes their customRate.
+export const VOUCHER_AMOUNT: Record<EmployeeLevel, number> = {
+  CLASSIC_D: 95_000,
+  FL: 105_000,
+  SILVER: 150_000,
+  GOLD: 250_000,
+  LB: 300_000,
+  PLATINUM: 400_000,
+  LV: 500_000,
+  MODEL: 700_000,
+  MANUAL: 0,
+};
+
+export const VOUCHER_LABEL: Record<EmployeeLevel, string> = {
+  CLASSIC_D: "D",
+  FL: "S",
+  SILVER: "SILVER",
+  GOLD: "GOLD",
+  LB: "LB",
+  PLATINUM: "PLATINUM",
+  LV: "LV",
+  MODEL: "MODEL",
+  MANUAL: "MANUAL INPUT",
+};
+
+// Levels whose rate is a fixed income (shown as "Pendapatan Tetap" instead of "default").
+export const FIXED_INCOME_LEVELS: readonly EmployeeLevel[] = ["CLASSIC_D", "FL", "PLATINUM"];
+
+/** Dropdown text for a level, e.g. "D (Pendapatan Tetap Rp 95.000)". */
+export function levelOptionLabel(level: EmployeeLevel): string {
+  const rp = VOUCHER_AMOUNT[level].toLocaleString("id-ID");
+  return FIXED_INCOME_LEVELS.includes(level) ? `${VOUCHER_LABEL[level]} (Pendapatan Tetap Rp ${rp})` : `${VOUCHER_LABEL[level]} (default Rp ${rp})`;
+}
+
+/** An employee's real per-voucher rate — MANUAL substitutes their own stored customRate. */
+export function employeeRate(level: EmployeeLevel, customRate?: number | null): number {
+  return level === "MANUAL" ? customRate ?? 0 : VOUCHER_AMOUNT[level];
+}
+
+export const KASBON_LABEL: Record<KasbonStatus, string> = {
+  MENUNGGU_OWNER: "Menunggu Owner",
+  DISETUJUI: "Disetujui",
+  DITOLAK: "Ditolak",
+};
+
+export const VOUCHER_STATUS_LABEL: Record<VoucherStatus, string> = {
+  MENUNGGU_VALIDASI: "Menunggu validasi",
+  TERVALIDASI: "Tervalidasi",
+  DICAIRKAN: "Dicairkan",
+};
+
+// AR Corp head office — Jakarta.
+// Kantor pusat: Jl. Mangga Besar IX No.1 Blok B2, Pinangsia, Taman Sari, Jakarta Barat 11110.
+// Koordinat dipasang dari alamat itu (perkiraan, belum dari pin Google Maps) — ganti di sini bila titiknya perlu digeser.
+export const HQ = { lat: -6.148, lng: 106.8205 };
+export const HQ_NAME = "Kantor Pusat — Jakarta Barat";
+// Second integrated office (shown next to HQ_ADDRESS on the Slip Gaji footer).
+export const OFFICE2_ADDRESS = "Komp. Ruko Kota Indah Jl. Pangeran Jayakarta No.5 Blok B4, RT.1/RW.2, Pinangsia, Kec. Taman Sari, Kota Jakarta Barat, DKI Jakarta 11110";
+export const HQ_ADDRESS = "Jl. Mangga Besar IX No.1 Blok B2, RT.7/RW.1, Pinangsia, Kec. Taman Sari, Kota Jakarta Barat, DKI Jakarta 11110";
+export const ATTENDANCE_RADIUS_KM = 1000;
+
+export const SESSION_COOKIE = "arcorp_session";
+export const SESSION_TTL_SECONDS = 60 * 60 * 12; // one field shift
+
+export const OTP_TTL_SECONDS = 5 * 60;
+export const OTP_MAX_ATTEMPTS = 5;
+
+// Preset field locations (venues) offered when adding an employee. A location
+// only matters as a fallback anyway: every real GPS check-in
+// (src/app/api/attendance/checkin) overwrites it with the employee's actual
+// coordinates going forward. These venues don't have known coordinates yet,
+// so they default to HQ (0 km, dalam radius) until a real check-in happens —
+// update the lat/lng here once each venue's actual address is known.
+export const FIELD_CITIES = [
+  { place: "OFFICE", lat: HQ.lat, lng: HQ.lng },
+  { place: "CALIFORNIA", lat: HQ.lat, lng: HQ.lng },
+  { place: "CLASSIC BUNGKER", lat: HQ.lat, lng: HQ.lng },
+  { place: "CLASSIC T2", lat: HQ.lat, lng: HQ.lng },
+  { place: "CLASSIC T5", lat: HQ.lat, lng: HQ.lng },
+  { place: "COLLO (1001)", lat: HQ.lat, lng: HQ.lng },
+  { place: "EL GROUP", lat: HQ.lat, lng: HQ.lng },
+  { place: "EMVO", lat: HQ.lat, lng: HQ.lng },
+  { place: "HOLYWOOD", lat: HQ.lat, lng: HQ.lng },
+  { place: "HRV", lat: HQ.lat, lng: HQ.lng },
+  { place: "KC", lat: HQ.lat, lng: HQ.lng },
+  { place: "LA", lat: HQ.lat, lng: HQ.lng },
+  { place: "MA", lat: HQ.lat, lng: HQ.lng },
+  { place: "MALIO", lat: HQ.lat, lng: HQ.lng },
+  { place: "MAXWELL", lat: HQ.lat, lng: HQ.lng },
+  { place: "MEDIKA", lat: HQ.lat, lng: HQ.lng },
+  { place: "MTR", lat: HQ.lat, lng: HQ.lng },
+  { place: "ROYAL", lat: HQ.lat, lng: HQ.lng },
+  { place: "SA", lat: HQ.lat, lng: HQ.lng },
+  { place: "SEVEN", lat: HQ.lat, lng: HQ.lng },
+  { place: "SUMO", lat: HQ.lat, lng: HQ.lng },
+  { place: "TRAVEL", lat: HQ.lat, lng: HQ.lng },
+  { place: "V-CLUB", lat: HQ.lat, lng: HQ.lng },
+] as const;
+
+export const FIELD_ROLES = ["Admin", "Kepala Mess", "Manager", "Koordinator", "Recruitment", "Salon", "Staff", "Tera", "Owner"] as const;
+
+// Only Peran "Tera" earns via Pendapatan/VCR (per-voucher commission) — every
+// other Peran is salaried (Gaji, a fixed monthly nominal on Employee.salary).
+// This is enforced everywhere an employee's income is read or recorded, not
+// just display: see the level/customRate vs. salary split in
+// prisma/schema.prisma and every call site that branches on usesVcr().
+export const VCR_ROLE = "Tera";
+export function usesVcr(role: string): boolean {
+  return role === VCR_ROLE;
+}
+
+// A Tera working fewer days than this in a completed month automatically
+// gets a Pinalty Absensi row on their Slip Pay (see ensureAttendancePenalty
+// in src/lib/payslip.ts). Also drives the "under minimum" flag on the
+// Ringkasan Operasional attendance dashboard.
+export const ATTENDANCE_MIN_DAYS = 20;
+
+// The self check-in box (src/lib/attendance.ts) replaced GPS login as the
+// source of "Hari Hadir" starting this month — any month before it has no
+// Attendance rows simply because the feature didn't exist yet, not because
+// nobody showed up. ensureAttendancePenalty() and the Ringkasan Operasional
+// table both skip/zero out months before this instead of reading that
+// absence as "0 hari hadir" and wrongly penalizing everyone retroactively.
+export const ATTENDANCE_CHECKIN_START_MONTH = "2026-09";
+export const ATTENDANCE_PENALTY_AMOUNT = 500_000;
+// Distinct from PAYSLIP_COST_CATEGORIES below — this one is only ever
+// applied by ensureAttendancePenalty(), never offered in the manual
+// "Tambah Rincian" dropdown, so there's exactly one way a Pinalty Absensi
+// row can appear (no risk of a duplicate manual + automatic pair).
+export const ATTENDANCE_PENALTY_CATEGORY = "Pinalty Absensi";
+
+// Non-Tera karyawan (salaried staff) must self-check-in by this Asia/Jakarta
+// wall-clock deadline; more than LATE_CHECKIN_GRACE_MINUTES past it
+// auto-books a one-off deduction on that day's Slip Pay (see
+// ensureLateCheckinPenalty in src/lib/attendance.ts, called right after
+// POST /api/absensi/checkin). Tera are exempt — Pendapatan/VCR already
+// tracks their pay through voucher activity, not a fixed clock-in time.
+// Jakarta (WIB) is a fixed UTC+7 offset with no daylight saving, so the
+// deadline is computed directly in UTC rather than trusting the host's own
+// timezone (Railway defaults to UTC; nothing else in this file assumes a
+// particular server TZ either).
+export const LATE_CHECKIN_DEADLINE_HOUR = 12; // Asia/Jakarta, 24h clock
+export const LATE_CHECKIN_GRACE_MINUTES = 15;
+export const LATE_CHECKIN_PENALTY_AMOUNT = 200_000;
+// Distinct from PAYSLIP_COST_CATEGORIES below, same reasoning as
+// ATTENDANCE_PENALTY_CATEGORY above — only ensureLateCheckinPenalty() ever
+// applies this one.
+export const LATE_CHECKIN_PENALTY_CATEGORY = "Pinalty Terlambat Absen";
+
+// Preset cost/deduction categories for the Tera Slip Pay "Tambah Rincian"
+// dropdown (src/app/admin/payslip/page.tsx). Selecting one still goes
+// through the normal manual PayslipItem flow (Admin/Owner types the
+// nominal) — this only removes free-text guesswork for the categories the
+// business tracks by name. Tabungan is deliberately NOT here: it's a
+// separate running log (SavingEntry) that doesn't touch the payslip total,
+// see src/app/api/admin/savings/route.ts.
+export const PAYSLIP_COST_CATEGORIES = [
+  "Admin",
+  "Mess",
+  "Dokter/Spekulo",
+  "Salon",
+  "Loker",
+  "Test Kehamilan, HIV/AIDS",
+  "Pinalty (SOP)",
+] as const;
+
+// Peran values that come with a real elevated login (see /admin/jabatan —
+// Owner/Consultant appoint one karyawan holding this Peran into the matching
+// AccessRole). Every other Peran (Koordinator, Recruitment, Salon, Staff, Tera)
+// is purely a descriptive label with no access change.
+//
+// appointerRoles restricts who may perform THAT seat's appointment (defaults
+// to the full OWNER/CONSULTANT manager set when omitted — see MANAGERS in
+// src/app/api/admin/jabatan/route.ts). The Owner seat is deliberately
+// narrower: only Consultant (AR Corp's own account) can install or replace
+// the business owner's login, so an Owner can never re-appoint themselves or
+// hand the seat to someone else unilaterally.
+// Owner used to be appointed here too (pick an existing Data Karyawan row).
+// It's been replaced by a dedicated one-time provisioning flow — see
+// OWNER_ACCOUNT_CODE below and /dev/nav-layout — so Jabatan Kantor lists the
+// re-appointable office seats: Admin, Kepala Mess, and Manager (equal to
+// Owner in every permission except the Owner Identity feature itself).
+export const APPOINTABLE_ROLES: { peran: string; accessRole: AccessRole; label: string; appointerRoles?: AccessRole[] }[] = [
+  { peran: "Admin", accessRole: "ADMIN_PUSAT", label: "Admin" },
+  { peran: "Kepala Mess", accessRole: "SUPERVISOR", label: "Kepala Mess" },
+  { peran: "Manager", accessRole: "MANAGER", label: "Manager" },
+];
+
+// The single Owner account's reserved employee code — mirrors HQ-CONSULT's
+// pattern (see prisma/ensure-office-accounts.ts). Only ever one row with
+// this code; Consultant "generates"/replaces it via
+// /api/admin/owner-identity, see src/app/dev/nav-layout.
+export const OWNER_ACCOUNT_CODE = "HQ-OWNER";
+
+// Dashboard appearance — switchable color palette and font pairing (see
+// /admin/pengaturan). Both lists double as the source of truth for
+// validating a saved AppSetting row; "classic" is AR Corp's own gold-black
+// look and stays the default so nothing changes visually until an
+// Owner/Consultant/Admin Pusat picks something else.
+export const THEME_COLORS = [
+  { id: "classic", label: "AR Corp Emas", desc: "Emas klasik + hitam pekat (tampilan asli AR Corp)" },
+  { id: "sand", label: "Emas Pasir", desc: "Coklat pasir hangat + krem — nuansa natural" },
+  { id: "sage", label: "Hijau Zaitun", desc: "Hijau zaitun lembut + krem" },
+  { id: "terracotta", label: "Terracotta", desc: "Oranye tanah liat + krem" },
+  { id: "rosegold", label: "Rose Gold", desc: "Merah muda keemasan — lembut dan mewah" },
+  { id: "pearl", label: "Putih Mutiara", desc: "Putih mutiara berkilau — bersih dan elegan" },
+] as const;
+export type ThemeColorId = (typeof THEME_COLORS)[number]["id"];
+export const THEME_COLOR_IDS = THEME_COLORS.map((t) => t.id) as ThemeColorId[];
+
+export const THEME_FONTS = [
+  { id: "classic", label: "Klasik", desc: "Cormorant Garamond + Manrope (tampilan asli)" },
+  { id: "modern", label: "Modern", desc: "Playfair Display + Inter" },
+  { id: "bold", label: "Tegas", desc: "Montserrat + Work Sans" },
+] as const;
+export type ThemeFontId = (typeof THEME_FONTS)[number]["id"];
+export const THEME_FONT_IDS = THEME_FONTS.map((t) => t.id) as ThemeFontId[];
+
+// Minimum days a newly uploaded logo must stay in place (see
+// /api/admin/settings/logo) before it can be replaced again.
+export const LOGO_LOCK_DAYS = 30;
+
+// Siang/Malam (light/dark) mode — see /admin/pengaturan and [data-mode] in
+// globals.css. "auto" is computed client-side from the VIEWER's own local
+// clock (see LightModeSync.tsx) since the server has no reliable way to know
+// a visitor's timezone; "light"/"dark" pin it regardless of the time.
+export const LIGHT_MODES = [
+  { id: "auto", label: "Otomatis (ikuti jam)", desc: "Terang jam 06.00–18.00, gelap di luar jam itu — mengikuti jam HP masing-masing." },
+  { id: "light", label: "Selalu Terang (Siang)", desc: "Tampilan terang sepanjang waktu." },
+  { id: "dark", label: "Selalu Gelap (Malam)", desc: "Tampilan gelap sepanjang waktu (tampilan asli)." },
+] as const;
+export type LightModeId = (typeof LIGHT_MODES)[number]["id"];
+export const LIGHT_MODE_IDS = LIGHT_MODES.map((m) => m.id) as LightModeId[];
+export const LIGHT_MODE_DAY_START_HOUR = 6;
+export const LIGHT_MODE_DAY_END_HOUR = 18;
+
+// The standing demo Tera account (see prisma/ensure-demo-tera.ts) — its
+// email/phone aren't real, so nobody can ever receive its OTP by email or
+// WhatsApp. issueOtp() (src/lib/otp.ts) checks this code to always surface
+// the code on-screen for this one account, in every environment including
+// production, so the demo stays usable without real delivery.
+export const DEMO_TERA_CODE = "DEMO-01";
+
+/** Official public contact of AR Corporation — one source for the privacy page, Pusat Sistem and Ara. */
+export const COMPANY_NAME = "AR Corporation";
+export const COMPANY_WEBSITE_HOST = "www.officialarcorporation.my.id";
+export const COMPANY_WEBSITE_URL = `https://${COMPANY_WEBSITE_HOST}`;
+export const COMPANY_EMAIL = "official.arcorporation@gmail.com";
+/** Public one-line description — used for the site metadata and the PWA manifest. */
+export const COMPANY_DESCRIPTION = "AR Corporation - Good Grip, Profesional, Trusted. Integrated HR System Management";

@@ -1,0 +1,792 @@
+@import "tailwindcss";
+
+:root {
+  /* AR Corp brand palette: deep black base with a warm classic gold accent
+     — matching the original AR Corp mark (gold "AR" monogram + crown on
+     black). Variable names keep the historic "ar-gold*" prefix directly
+     matching the brand this time (no more red/silver indirection). ar-red
+     stays a separate, desaturated coral reserved for error/danger states. */
+  --ar-bg: #07080b;
+  --ar-bg-deep: #020306;
+  --ar-bezel: #151821;
+  --ar-surface: #0f1117;
+  --ar-surface2: rgba(200, 215, 255, 0.035);
+  --ar-line: rgba(190, 205, 235, 0.1);
+  --ar-text: #ede9e2;
+  --ar-dim: rgba(237, 233, 226, 0.62);
+  --ar-faint: rgba(237, 233, 226, 0.4);
+  --ar-input: rgba(0, 0, 0, 0.4);
+
+  /* The brand accent, split into three pieces (rgb triplet for opacity-varied
+     glows/shadows, plus dark/bright stops for the enamel gradient) so a
+     dashboard color theme (see [data-theme] below and THEME_COLORS in
+     src/lib/constants.ts) can swap the whole accent family by redefining
+     just these three variables — everything downstream (ar-gold, goldfill,
+     glows, sparkle, pulse) is derived from them. */
+  --ar-accent-rgb: 214, 174, 95;
+  --ar-accent-dark: #7a5427;
+  --ar-accent-bright: #fbe6ae;
+
+  --ar-gold: #d6ae5f;
+  --ar-gold2: #f1d18a;
+  --ar-gold3: #f1d18a;
+  --ar-ongold: #17110a;
+  --ar-goldline: rgba(224, 184, 104, 0.32);
+  --ar-goldfill: rgba(224, 184, 104, 0.09);
+  --ar-moonlight: rgba(200, 215, 255, 0.035);
+  --ar-red: #e4756b;
+  --ar-green: #7fd1a8;
+
+  /* True gold accent — distinct from the brand-red-holding ar-gold* tokens
+     above. Used for the login screen's decorative ring frame, wordmark and
+     tagline where an actual gold tone (not the red/silver theme) is wanted. */
+  --ar-truegold: #dcb45f;
+  --ar-truegold2: #f5dfa5;
+  --ar-truegold-line: rgba(220, 180, 95, 0.45);
+
+  /* Font pack indirection: a page's font-display/font-sans utilities always
+     read --font-display/--font-sans; [data-font] below just repoints those
+     two at a different pre-loaded next/font pack (see layout.tsx), so
+     switching fonts never needs a client-side font fetch or causes FOUC. */
+  --font-display: var(--font-display-classic);
+  --font-sans: var(--font-sans-classic);
+}
+
+/* Dashboard color themes (see THEME_COLORS in src/lib/constants.ts and the
+   Pengaturan Tampilan page) — each swaps only the brand-accent family
+   (ar-accent-*, ar-gold, ar-goldfill); backgrounds, text and the neutral
+   tones stay the same across all four so the app keeps its dark-luxury
+   identity regardless of which natural accent is active. "classic" (AR
+   Corp's own gold) needs no block — it's the :root default above. */
+[data-theme="sand"] {
+  --ar-accent-rgb: 181, 120, 46;
+  --ar-accent-dark: #5c3a14;
+  --ar-accent-bright: #e7a94f;
+  --ar-gold: #b5782e;
+}
+[data-theme="sage"] {
+  --ar-accent-rgb: 122, 135, 79;
+  --ar-accent-dark: #3f4a2a;
+  --ar-accent-bright: #a8b878;
+  --ar-gold: #7a874f;
+}
+[data-theme="terracotta"] {
+  --ar-accent-rgb: 193, 90, 53;
+  --ar-accent-dark: #6e2f18;
+  --ar-accent-bright: #e8905f;
+  --ar-gold: #c15a35;
+}
+[data-theme="rosegold"] {
+  --ar-accent-rgb: 200, 130, 130;
+  --ar-accent-dark: #6b3238;
+  --ar-accent-bright: #f0c9c3;
+  --ar-gold: #c88282;
+}
+[data-theme="pearl"] {
+  --ar-accent-rgb: 214, 210, 201;
+  --ar-accent-dark: #6e6a60;
+  --ar-accent-bright: #f7f5ef;
+  --ar-gold: #d6d2c9;
+}
+
+/* Mode Siang (Terang) — see LIGHT_MODES in src/lib/constants.ts and the
+   [data-mode] attribute set in layout.tsx (server default + the
+   beforeInteractive script that corrects it from the viewer's own local
+   clock). Only the neutral surface/text tokens flip here; the accent family
+   above ([data-theme]) is orthogonal and keeps working the same in either
+   mode. Mode Malam (Gelap) needs no block — it's the :root default above. */
+[data-mode="light"] {
+  --ar-bg: #f3f2ef;
+  --ar-bg-deep: #ffffff;
+  --ar-bezel: #e6e4df;
+  --ar-surface: #ffffff;
+  --ar-surface2: rgba(0, 0, 0, 0.035);
+  --ar-line: rgba(20, 25, 40, 0.11);
+  --ar-text: #07080a;
+  --ar-dim: rgba(7, 8, 10, 0.8);
+  --ar-faint: rgba(7, 8, 10, 0.62);
+  --ar-input: rgba(0, 0, 0, 0.045);
+  --ar-moonlight: rgba(0, 0, 0, 0.035);
+}
+
+/* Day mode: slightly heavier body text so it reads as true black on the white surfaces. */
+[data-mode="light"] body {
+  font-weight: 500;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-font="modern"] {
+  --font-display: var(--font-display-modern);
+  --font-sans: var(--font-sans-modern);
+}
+[data-font="bold"] {
+  --font-display: var(--font-display-bold);
+  --font-sans: var(--font-sans-bold);
+}
+
+@theme inline {
+  --color-ar-bg: var(--ar-bg);
+  --color-ar-bezel: var(--ar-bezel);
+  --color-ar-surface: var(--ar-surface);
+  --color-ar-surface2: var(--ar-surface2);
+  --color-ar-line: var(--ar-line);
+  --color-ar-text: var(--ar-text);
+  --color-ar-dim: var(--ar-dim);
+  --color-ar-faint: var(--ar-faint);
+  --color-ar-input: var(--ar-input);
+  --color-ar-gold: var(--ar-gold);
+  --color-ar-gold2: var(--ar-gold2);
+  --color-ar-gold3: var(--ar-gold3);
+  --color-ar-ongold: var(--ar-ongold);
+  --color-ar-goldline: var(--ar-goldline);
+  --color-ar-goldfill: var(--ar-goldfill);
+  --color-ar-red: var(--ar-red);
+  --color-ar-green: var(--ar-green);
+  --color-ar-truegold: var(--ar-truegold);
+  --color-ar-truegold2: var(--ar-truegold2);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Base layer, so Tailwind utilities (text-ar-dim, text-ar-text …) override the
+   default link color. Unlayered, this rule beat them and turned every inactive
+   nav link gold. */
+@layer base {
+  a {
+    color: var(--ar-gold);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--ar-gold2);
+  }
+}
+
+input,
+textarea,
+button {
+  font-family: inherit;
+}
+/* Visible keyboard/field focus. The ring is the accent on Night and the text
+   color on Day, since gold on the light surfaces falls below 3:1. */
+:root {
+  --ar-focus: var(--ar-gold);
+}
+[data-mode="light"] {
+  --ar-focus: var(--ar-text);
+}
+:focus-visible {
+  outline: 2px solid var(--ar-focus);
+  outline-offset: 2px;
+}
+::placeholder {
+  color: var(--ar-faint);
+}
+
+.arScroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.arScroll::-webkit-scrollbar-thumb {
+  background: var(--ar-goldline);
+  border-radius: 6px;
+}
+
+/* Primary CTA: a lacquered-red gradient (deep red into a brighter red
+   flash and back) with a diagonal chrome-silver sheen sweeping across it
+   — read as polished red enamel catching a strip of light, not a flat
+   fill. */
+.ar-grad {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    135deg,
+    var(--ar-gold) 0%,
+    var(--ar-accent-bright) 50%,
+    var(--ar-gold) 100%
+  );
+  background-size: 220% auto;
+  animation: arSheen 6s ease-in-out infinite;
+}
+.ar-grad::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.28) 48%, transparent 60%);
+  background-size: 220% 100%;
+  animation: arChromeSweep 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Base page wash: deep-black vignette from the center-top, kept for pages
+   that don't need the full four-corner treatment below. */
+.ar-glow {
+  background: radial-gradient(900px 500px at 50% -10%, rgba(var(--ar-accent-rgb), 0.12), transparent 70%);
+}
+
+/* Full luxury backdrop — bold red bleeding in from all four corners
+   against the black field, plus a faint silver "moonlight" wash so red
+   and black read as one deliberate pairing rather than a flat dark theme
+   with color dropped on top. */
+.ar-glow-corners {
+  background:
+    radial-gradient(560px 420px at 0% 0%, rgba(var(--ar-accent-rgb), 0.16), transparent 62%),
+    radial-gradient(560px 420px at 100% 0%, rgba(var(--ar-accent-rgb), 0.16), transparent 62%),
+    radial-gradient(620px 460px at 0% 100%, rgba(var(--ar-accent-rgb), 0.12), transparent 62%),
+    radial-gradient(620px 460px at 100% 100%, rgba(var(--ar-accent-rgb), 0.12), transparent 62%),
+    radial-gradient(1000px 700px at 50% 15%, var(--ar-moonlight), transparent 65%),
+    var(--ar-bg-deep);
+}
+
+/* Sparse "blink blink silver" sparkle across the black field — tiny,
+   low-opacity chrome glints; decorative only, never dense enough to
+   compete with content. */
+.ar-stars {
+  position: relative;
+}
+.ar-stars::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 18%, rgba(255, 255, 255, 0.45), transparent 100%),
+    radial-gradient(1.5px 1.5px at 82% 12%, rgba(255, 255, 255, 0.38), transparent 100%),
+    radial-gradient(1px 1px at 68% 78%, rgba(255, 255, 255, 0.4), transparent 100%),
+    radial-gradient(1px 1px at 24% 82%, rgba(255, 255, 255, 0.32), transparent 100%),
+    radial-gradient(1.5px 1.5px at 92% 55%, rgba(var(--ar-accent-rgb), 0.5), transparent 100%),
+    radial-gradient(1px 1px at 6% 52%, rgba(255, 255, 255, 0.3), transparent 100%);
+}
+
+/* Chrome text that catches light as it moves — a slow, formal shimmer
+   rather than a flashy loop. Use for the silver half of the wordmark and
+   other luxury highlights (totals, key numbers). */
+.ar-shimmer-text {
+  background: linear-gradient(100deg, #b9bec7 15%, #ffffff 45%, var(--ar-gold2) 60%, #b9bec7 85%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: arSheen 5s ease-in-out infinite;
+}
+
+/* Bold-red counterpart to ar-shimmer-text, for the red half of the
+   wordmark and other statement accents. */
+.ar-shimmer-red {
+  background: linear-gradient(
+    100deg,
+    var(--ar-accent-dark) 15%,
+    var(--ar-gold) 40%,
+    var(--ar-accent-bright) 55%,
+    var(--ar-gold) 75%,
+    var(--ar-accent-dark)
+  );
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: arSheen 5s ease-in-out infinite;
+}
+
+/* Gold counterpart to ar-shimmer-text/ar-shimmer-red, for the login
+   screen's gold wordmark and tagline. */
+.ar-shimmer-gold {
+  background: linear-gradient(100deg, #8a6429 15%, var(--ar-truegold) 40%, #fff1c9 55%, var(--ar-truegold) 75%, #8a6429);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: arSheen 5s ease-in-out infinite;
+}
+
+@keyframes arSheen {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes arChromeSweep {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
+/* Formal ornamental divider — a thin chrome hairline on each side with a
+   rotated diamond mark at the center. Pure CSS, no image asset needed. */
+.ar-divider-ornate {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ar-divider-ornate::before,
+.ar-divider-ornate::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ar-goldline));
+}
+.ar-divider-ornate::after {
+  background: linear-gradient(90deg, var(--ar-goldline), transparent);
+}
+.ar-divider-ornate-mark {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, var(--ar-gold), #ffffff);
+  box-shadow: 0 0 10px 1px rgba(var(--ar-accent-rgb), 0.55);
+}
+
+/* Gives a card a fine chrome hairline plus a soft outer red bloom, for
+   surfaces that should read as the "important" focal object on a page. */
+.ar-frame-luxury {
+  border: 1px solid var(--ar-goldline);
+  box-shadow:
+    0 30px 70px -30px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 0 40px -12px rgba(var(--ar-accent-rgb), 0.3);
+}
+
+/* Active-tab fill for the login portal switcher: a soft gold gradient,
+   distinct from the red-tinted ar-goldfill used elsewhere. */
+.ar-tab-active-gold {
+  background: linear-gradient(135deg, rgba(220, 180, 95, 0.26), rgba(245, 223, 165, 0.3));
+  color: var(--ar-truegold2);
+}
+
+/* Decorative gold ring/oval frame drawn around the login card — a double
+   hairline with a faint outer glow, sitting behind the card via negative
+   inset so it reads as an ornamental border rather than a hard box. */
+.ar-ring-gold {
+  position: relative;
+}
+.ar-ring-gold::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 34px;
+  border: 1.5px solid var(--ar-truegold-line);
+  box-shadow:
+    0 0 26px -4px rgba(220, 180, 95, 0.4),
+    inset 0 0 26px -10px rgba(220, 180, 95, 0.25);
+  pointer-events: none;
+}
+.ar-ring-gold::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 26px;
+  border: 1px solid rgba(220, 180, 95, 0.3);
+  pointer-events: none;
+}
+
+/* Thin gold accent underline for the bottom tagline. */
+.ar-tagline-underline {
+  width: 64px;
+  height: 2px;
+  margin: 9px auto 0;
+  background: linear-gradient(90deg, transparent, var(--ar-truegold), transparent);
+}
+
+@keyframes arPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--ar-accent-rgb), 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 9px rgba(var(--ar-accent-rgb), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--ar-accent-rgb), 0);
+  }
+}
+.ar-pulse {
+  animation: arPulse 1.6s infinite;
+}
+
+/* Running-text announcement banner below the header logo — see AppHeader.tsx */
+@keyframes arMarquee {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+.ar-marquee-track {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ar-marquee-track span {
+  display: inline-block;
+  animation: arMarquee 18s linear infinite;
+}
+
+@keyframes arIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ar-in {
+  animation: arIn 0.5s ease both;
+}
+
+/* Printing a Slip Pay (Rincian Totalan): hide every bit of app chrome —
+   sidebar, bottom nav, buttons/forms — and print only the payslip itself,
+   scoped so it never affects printing anywhere else in the app. */
+@media print {
+  body:has(#payslip-print-area) * {
+    visibility: hidden;
+  }
+  body:has(#payslip-print-area) #payslip-print-area,
+  body:has(#payslip-print-area) #payslip-print-area * {
+    visibility: visible;
+  }
+  body:has(#payslip-print-area) #payslip-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
+
+/* Printing Laporan Totalan: same approach — only the report area prints, in plain black on white
+   so it is readable on paper regardless of the dark/gold screen theme. */
+@media print {
+  body:has(#report-print-area) * {
+    visibility: hidden;
+  }
+  body:has(#report-print-area) #report-print-area,
+  body:has(#report-print-area) #report-print-area * {
+    visibility: visible;
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #999 !important;
+    box-shadow: none !important;
+  }
+  body:has(#report-print-area) #report-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #fff !important;
+  }
+  body:has(#report-print-area) .report-no-print {
+    display: none !important;
+  }
+}
+
+/* Honor the OS "reduce motion" setting: stop every looping or entrance
+   animation (sheens, sweeps, pulse, marquee, fade-in). Content stays visible. */
+@media (prefers-reduced-motion: reduce) {
+  .ar-grad,
+  .ar-grad::after,
+  .ar-shimmer-text,
+  .ar-shimmer-red,
+  .ar-shimmer-gold,
+  .ar-pulse,
+  .ar-in,
+  .ar-marquee-track span {
+    animation: none;
+  }
+}
+
+/* Attendance map (admin Lokasi & Absensi): pins, labels and a dark basemap. */
+.arc-map-dot {
+  display: block;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+.arc-map-dot-live {
+  animation: arcMapPulse 1.8s ease-out infinite;
+}
+@keyframes arcMapPulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--dot) 70%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--dot) 0%, transparent);
+  }
+}
+.arc-map-label {
+  white-space: nowrap;
+  margin-bottom: 3px;
+  pointer-events: none;
+  background: rgba(7, 8, 11, 0.82);
+  color: #f1d18a;
+  border: 1px solid rgba(224, 184, 104, 0.35);
+  border-radius: 6px;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  box-shadow: none;
+}
+[data-mode="dark"] .arc-map {
+  background: #0b0d12;
+}
+/* Map popups: explicit colours per mode so the text never inherits a pale app colour onto the popup surface. */
+.arc-map .maplibregl-popup-content {
+  background: #ffffff;
+  color: #1b1f27;
+  border-radius: 12px;
+  padding: 12px 14px;
+  min-width: 190px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.arc-map .maplibregl-popup-tip {
+  border-top-color: #ffffff;
+  border-bottom-color: #ffffff;
+}
+.arc-map .maplibregl-popup-close-button {
+  color: #5b6472;
+  font-size: 18px;
+  padding: 2px 8px;
+}
+[data-mode="dark"] .arc-map .maplibregl-popup-content {
+  background: #171a21;
+  color: #f2f4f8;
+  border: 1px solid rgba(224, 184, 104, 0.35);
+}
+[data-mode="dark"] .arc-map .maplibregl-popup-tip {
+  border-top-color: #171a21;
+  border-bottom-color: #171a21;
+}
+[data-mode="dark"] .arc-map .maplibregl-popup-close-button {
+  color: #c4cad6;
+}
+.arc-pop-name {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  padding-right: 14px;
+}
+.arc-pop-row {
+  font-size: 13px;
+  font-weight: 500;
+}
+.arc-pop-muted {
+  font-size: 12px;
+  color: #5b6472;
+  margin-top: 2px;
+}
+[data-mode="dark"] .arc-pop-muted {
+  color: #b4bcc9;
+}
+.arc-pop-live {
+  color: #0f7a3c;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.arc-pop-warn {
+  color: #9a5200;
+  font-weight: 600;
+  margin-top: 4px;
+}
+[data-mode="dark"] .arc-pop-live {
+  color: #6fe0a2;
+}
+[data-mode="dark"] .arc-pop-warn {
+  color: #f6b45a;
+}
+.arc-pop-btn {
+  margin-top: 8px;
+  cursor: pointer;
+  background: #d6ae5f;
+  color: #1b1304;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arc-map-dot-live {
+    animation: none;
+  }
+}
+
+
+/* Pusat Sistem — big animated gold "AR Corporation" mark. */
+.ar-copyright-gold {
+  font-family: var(--font-display-bold), var(--font-sans), sans-serif;
+  font-weight: 800;
+  background: linear-gradient(100deg, #9a7420 0%, #f7e3a1 16%, #d9ab3c 32%, #fff4c9 48%, #c8932c 64%, #f3d57d 80%, #9a7420 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 4px 18px rgba(217, 171, 60, 0.35));
+  animation: arGoldSweep 6s linear infinite;
+}
+@keyframes arGoldSweep {
+  from { background-position: 0% 0; }
+  to { background-position: -260% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ar-copyright-gold { animation: none; background-position: 40% 0; }
+}
+
+/* Pusat Sistem — the copyright plate comes alive: drifting glows, a light beam,
+   a breathing border and contact lines that rise in one by one. */
+.ar-copyright-plate {
+  background: radial-gradient(120% 140% at 50% 0%, #1a1408 0%, #09090b 62%);
+}
+.ar-copyright-plate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 38px rgba(217, 171, 60, 0.28);
+  opacity: 0;
+  animation: arPlateBreath 4.5s ease-in-out infinite;
+}
+.ar-plate-glow {
+  position: absolute;
+  width: 340px;
+  height: 340px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(217, 171, 60, 0.34) 0%, rgba(217, 171, 60, 0) 68%);
+  filter: blur(8px);
+}
+.ar-plate-glow-a { top: -150px; left: -90px; animation: arPlateDriftA 11s ease-in-out infinite; }
+.ar-plate-glow-b { bottom: -170px; right: -100px; animation: arPlateDriftB 13s ease-in-out infinite; }
+.ar-plate-beam {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 28%;
+  pointer-events: none;
+  background: linear-gradient(100deg, rgba(255, 244, 201, 0) 0%, rgba(255, 244, 201, 0.10) 50%, rgba(255, 244, 201, 0) 100%);
+  transform: translateX(-140%) skewX(-18deg);
+  animation: arPlateBeam 7s ease-in-out infinite;
+}
+.ar-plate-rule {
+  height: 1px;
+  width: min(420px, 70%);
+  margin: 22px auto 0;
+  background: linear-gradient(90deg, rgba(217, 171, 60, 0), #d9ab3c, rgba(217, 171, 60, 0));
+  animation: arPlateRule 5s ease-in-out infinite;
+}
+.ar-plate-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  animation: arPlateRise 0.7s ease-out forwards;
+}
+.ar-plate-label {
+  font-size: 12px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: #bfae80;
+}
+.ar-plate-link { color: #f3d57d; text-underline-offset: 4px; display: inline-flex; align-items: center; min-height: 44px; }
+.ar-plate-link:hover { text-decoration: underline; }
+@keyframes arPlateBreath {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@keyframes arPlateDriftA {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(140px, 70px) scale(1.25); }
+}
+@keyframes arPlateDriftB {
+  0%, 100% { transform: translate(0, 0) scale(1.1); }
+  50% { transform: translate(-150px, -60px) scale(0.9); }
+}
+@keyframes arPlateBeam {
+  0% { transform: translateX(-140%) skewX(-18deg); opacity: 0; }
+  15% { opacity: 1; }
+  60% { transform: translateX(380%) skewX(-18deg); opacity: 1; }
+  100% { transform: translateX(380%) skewX(-18deg); opacity: 0; }
+}
+@keyframes arPlateRule {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@keyframes arPlateRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ar-copyright-plate::after, .ar-plate-glow, .ar-plate-beam, .ar-plate-rule { animation: none; }
+  .ar-plate-beam { display: none; }
+  .ar-plate-item { animation: none; opacity: 1; }
+}
+
+/* Pusat Sistem — the plate as an aquarium: two big gold koi circle the banner in opposite
+   directions (position and heading are driven by GoldFishTank.tsx). */
+.ar-tank { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.ar-tank-waterline {
+  position: absolute; left: 0; right: 0; top: 0; height: 46px;
+  background: linear-gradient(180deg, rgba(255, 244, 201, 0.10), rgba(255, 244, 201, 0));
+}
+.ar-bubble {
+  position: absolute; bottom: -12px; border-radius: 9999px;
+  border: 1px solid rgba(255, 238, 180, 0.55);
+  background: radial-gradient(circle at 32% 30%, rgba(255, 250, 225, 0.55), rgba(255, 250, 225, 0.04) 62%);
+  animation-name: arBubbleRise; animation-timing-function: ease-in; animation-iteration-count: infinite;
+  opacity: 0;
+}
+.ar-koi-wrap { position: absolute; left: 0; top: 0; opacity: 0; will-change: transform; }
+.ar-koi { display: block; width: 100%; height: auto; overflow: visible; filter: drop-shadow(0 0 10px rgba(240, 199, 90, 0.55)); }
+.ar-koi-amber { filter: hue-rotate(-10deg) saturate(1.15) drop-shadow(0 0 10px rgba(240, 170, 70, 0.55)); }
+.ar-koi-tail { transform-box: view-box; transform-origin: 64px 40px; transform: rotate(var(--tail, 0deg)); }
+.ar-koi-pec-t { transform-box: view-box; transform-origin: 132px 30px; transform: rotate(var(--pec-t, 0deg)); }
+.ar-koi-pec-b { transform-box: view-box; transform-origin: 132px 50px; transform: rotate(var(--pec-b, 0deg)); }
+@keyframes arBubbleRise {
+  0% { transform: translateY(0) translateX(0); opacity: 0; }
+  10% { opacity: 0.9; }
+  50% { transform: translateY(-170px) translateX(6px); }
+  90% { opacity: 0.7; }
+  100% { transform: translateY(-340px) translateX(-4px); opacity: 0; }
+}
+/* The banner text sits above the fish: a dark halo keeps it readable while a koi passes behind. */
+.ar-copyright-plate .ar-copyright-gold { filter: drop-shadow(0 0 14px rgba(9, 9, 11, 0.9)) drop-shadow(0 4px 18px rgba(217, 171, 60, 0.35)); }
+.ar-plate-contact {
+  background: rgba(9, 9, 11, 0.62);
+  border: 1px solid rgba(217, 171, 60, 0.2);
+  border-radius: 16px;
+  padding: 14px 20px;
+  text-shadow: 0 0 8px #09090b, 0 0 3px #09090b;
+}
+.ar-plate-head-line { text-shadow: 0 0 10px #09090b, 0 0 4px #09090b; }
+@media (prefers-reduced-motion: reduce) {
+  .ar-bubble { display: none; }
+}
+
+/* ---- Ara, the AR Corp doll mascot (src/components/employee/ArMascot.tsx) ---- */
+.arc-mascot { display: block; overflow: visible; }
+.arc-mascot-dots { opacity: 0; }
+.arc-mascot-eyes { transform-box: fill-box; transform-origin: center; animation: arcMascotBlink 4.6s infinite; }
+.arc-mascot-thinking .arc-mascot-dots { opacity: 1; animation: arcMascotDots 1.2s infinite; }
+.arc-mascot-thinking .arc-mascot-eyes { animation: none; transform: translateY(-2px); }
+.arc-mascot-talking .arc-mascot-mouth { transform-box: fill-box; transform-origin: center; animation: arcMascotTalk 0.5s infinite; }
+@keyframes arcMascotBlink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+@keyframes arcMascotDots { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@keyframes arcMascotTalk { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.9) translateY(1px); } }
+@keyframes arcAraFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.arc-ara-fab { animation: arcAraFloat 3.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .arc-mascot-eyes, .arc-mascot-dots, .arc-mascot-mouth, .arc-ara-fab { animation: none !important; }
+}
